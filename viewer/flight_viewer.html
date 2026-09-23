@@ -5,14 +5,16 @@
 <title>Flight viewer</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
-  html, body { margin: 0; height: 100%; overflow: hidden; background: #1b1f26; color: #e6e6e6;
+  :root { --bg: #1b1f26; --panel: rgba(20, 24, 30, 0.88); --border: #3a4150; --text: #e6e6e6;
+          --muted: #9fb0c8; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); color: var(--text);
                font: 13px/1.4 system-ui, sans-serif; }
   canvas { display: block; }
-  .panel { position: absolute; background: rgba(20, 24, 30, 0.88); border: 1px solid #3a4150;
+  .panel { position: absolute; background: var(--panel); border: 1px solid var(--border);
            border-radius: 4px; padding: 8px 10px; }
   #files { top: 10px; left: 10px; width: 260px; }
   #files label { display: block; margin: 4px 0; }
-  #status { color: #9fb0c8; margin: 6px 0; }
+  #status { color: var(--muted); margin: 6px 0; }
   .geom { display: grid; grid-template-columns: 1fr 1fr; gap: 3px 10px; }
   .geom label { display: flex; justify-content: space-between; align-items: center; margin: 0; }
   .geom input { width: 64px; }
@@ -20,6 +22,11 @@
   #transport { left: 10px; right: 10px; bottom: 10px; display: flex; gap: 12px; align-items: center; }
   #slider { flex: 1; }
   button { min-width: 64px; }
+  @media (max-width: 640px) {  /* phone: one panel across the top, readout above the transport */
+    #files { width: auto; right: 10px; }
+    #files .geom { display: none; }
+    #readout { top: auto; bottom: 60px; left: 10px; right: 10px; min-width: 0; }
+  }
 </style>
 </head>
 <body>
@@ -52,6 +59,9 @@
   <label><input type="checkbox" id="follow"> Follow rocket</label>
 </div>
 
+<!-- scripts/bundle_viewer.py fills these two blocks so one HTML file carries a whole flight -->
+<script type="text/csv" id="embeddedLog"></script>
+<script type="text/yaml" id="embeddedRocket"></script>
 <script src="https://cdn.jsdelivr.net/npm/js-yaml@4.1.0/dist/js-yaml.min.js"></script>
 <script type="importmap">
 {
@@ -269,7 +279,7 @@ renderer.setPixelRatio(window.devicePixelRatio);
 renderer.setSize(window.innerWidth, window.innerHeight);
 document.body.appendChild(renderer.domElement);
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x1b1f26);
+scene.background = new THREE.Color(getComputedStyle(document.documentElement).getPropertyValue('--bg').trim());
 scene.add(sim);
 scene.add(new THREE.HemisphereLight(0xdfe8ff, 0x303030, 1.2));
 const sun = new THREE.DirectionalLight(0xffffff, 1.5);
@@ -343,8 +353,12 @@ function showRow(index) {
 }
 
 async function loadCsv(file) {
+  loadCsvText(file.name, await file.text());
+}
+
+function loadCsvText(name, text) {
   try {
-    const { columns, rows } = parseCsv(await file.text());
+    const { columns, rows } = parseCsv(text);
     flight = { rows, times: rows.map((row) => row.time_s), tEnd: rows[rows.length - 1].time_s };
     ui.slider.max = rows.length - 1;
     simTime = 0;
@@ -357,21 +371,25 @@ async function loadCsv(file) {
     }
     frameCamera(extent);
     const missing = ['true_x_m', 'true_z_m', 'true_qw'].filter((name) => !columns.includes(name));
-    ui.status.textContent = `${file.name}: ${rows.length} rows, ${fmt(flight.tEnd, 2)} s`
+    ui.status.textContent = `${name}: ${rows.length} rows, ${fmt(flight.tEnd, 2)} s`
       + (missing.length ? `. Missing columns: ${missing.join(', ')}` : '');
   } catch (err) {
-    ui.status.textContent = `Could not read ${file.name}: ${err.message}`;
+    ui.status.textContent = `Could not read ${name}: ${err.message}`;
   }
 }
 
 async function loadYaml(file) {
+  loadYamlText(file.name, await file.text());
+}
+
+function loadYamlText(name, text) {
   try {
-    const g = geometryFromYaml(globalThis.jsyaml.load(await file.text()));
+    const g = geometryFromYaml(globalThis.jsyaml.load(text));
     for (const [key, el] of Object.entries(geomInputs)) if (g[key] !== undefined) el.value = g[key];
     rebuildRocket();
-    ui.status.textContent = `Rocket geometry from ${file.name}`;
+    ui.status.textContent = `Rocket geometry from ${name}`;
   } catch (err) {
-    ui.status.textContent = `Could not read ${file.name}: ${err.message}`;
+    ui.status.textContent = `Could not read ${name}: ${err.message}`;
   }
 }
 
@@ -416,9 +434,46 @@ window.addEventListener('resize', () => {
   renderer.setSize(window.innerWidth, window.innerHeight);
 });
 
+// A flight can also arrive already in the page (scripts/bundle_viewer.py fills the two blocks
+// above the scripts) or through ?log=...&rocket=... URLs relative to this page, which is the
+// link scripts/serve_viewer.py prints. Either way the page opens close to the rocket and playing.
+async function fetchText(url) {
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`HTTP ${response.status} for ${url}`);
+  return response.text();
+}
+
+async function startupSource(blockId, param) {
+  const block = document.getElementById(blockId);
+  const url = new URLSearchParams(location.search).get(param);
+  if (block.textContent.trim()) return { name: block.dataset.name || blockId, text: block.textContent };
+  if (url) return { name: url, text: await fetchText(url) };
+  return null;
+}
+
+function presentFlight() {
+  if (!flight) return;
+  ui.follow.checked = true;
+  frameCamera(2.5 * readGeometry().length);
+  if (!matchMedia('(prefers-reduced-motion: reduce)').matches) setPlaying(true);
+}
+
+async function loadStartupSources() {
+  try {
+    const rocketSource = await startupSource('embeddedRocket', 'rocket');
+    if (rocketSource) loadYamlText(rocketSource.name, rocketSource.text);
+    const logSource = await startupSource('embeddedLog', 'log');
+    if (logSource) loadCsvText(logSource.name, logSource.text);
+  } catch (err) {
+    ui.status.textContent = `Could not load: ${err.message}`;
+  }
+  presentFlight();
+}
+
 rebuildRocket();
 frameCamera(1.5);
 requestAnimationFrame(animate);
+loadStartupSources();
 </script>
 </body>
 </html>

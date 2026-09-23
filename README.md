@@ -59,7 +59,9 @@ for it and Stable-Baselines3 2.4 needs numpy 1.x.
 - `scripts/fly_scripted.py` flies the rocket without any controller (stage 1) and with the
   PID baseline (from stage 2).
 - `scripts/plot_flight.py` plots one flight log. `scripts/animate_flight.py` renders it as a
-  GIF or MP4, and `viewer/flight_viewer.html` shows it in the browser.
+  GIF or MP4, and `viewer/flight_viewer.html` shows it in the browser. `scripts/bundle_viewer.py`
+  packs the viewer and one flight into a single HTML file and `scripts/serve_viewer.py` serves
+  the viewer from a remote machine.
 
 ## Adding a rocket
 
@@ -151,6 +153,27 @@ For an interactive view, open `viewer/flight_viewer.html` in a browser, choose t
 optionally, the rocket YAML so the drawing has the right proportions. You can orbit, zoom,
 scrub through time and switch between the true and the estimated state. The page loads
 three.js from a CDN, so it needs an internet connection the first time.
+
+If the simulator runs on a remote machine you reach over SSH, the HTML file is not on the
+computer that has the browser. Two ways around that:
+
+```
+python scripts/bundle_viewer.py runs/vertical.csv --out runs/vertical.html
+```
+
+writes one self-contained HTML file with the flight and the rocket geometry inside it.
+Download that file (in VS Code: right click it, Download) and open it on any computer. It
+starts playing with the camera following the rocket. Or
+
+```
+python scripts/serve_viewer.py runs/vertical.csv
+```
+
+serves the project folder on port 8000 and prints a link. VS Code forwards the port by itself
+when it sees the link in the terminal; from a plain SSH session, connect with
+`ssh -L 8000:localhost:8000 user@host` first, then open the link on your own computer. The
+viewer reads `?log=` and `?rocket=` from its URL, which is what that link carries, so you can
+edit the log name in the address bar after another run.
 
 ## Training, evaluating, exporting, comparing with a real flight
 
