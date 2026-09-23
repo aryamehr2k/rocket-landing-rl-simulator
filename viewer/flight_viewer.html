@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Flight viewer</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #1b1f26; color: #e6e6e6;
+               font: 13px/1.4 system-ui, sans-serif; }
+  canvas { display: block; }
+  .panel { position: absolute; background: rgba(20, 24, 30, 0.88); border: 1px solid #3a4150;
+           border-radius: 4px; padding: 8px 10px; }
+  #files { top: 10px; left: 10px; width: 260px; }
+  #files label { display: block; margin: 4px 0; }
+  #status { color: #9fb0c8; margin: 6px 0; }
+  .geom { display: grid; grid-template-columns: 1fr 1fr; gap: 3px 10px; }
+  .geom label { display: flex; justify-content: space-between; align-items: center; margin: 0; }
+  .geom input { width: 64px; }
+  #readout { top: 10px; right: 10px; min-width: 200px; font-family: ui-monospace, monospace; white-space: pre; }
+  #transport { left: 10px; right: 10px; bottom: 10px; display: flex; gap: 12px; align-items: center; }
+  #slider { flex: 1; }
+  button { min-width: 64px; }
+</style>
+</head>
+<body>
+<div id="files" class="panel">
+  <label>Flight log CSV <input type="file" id="csvFile" accept=".csv,text/csv"></label>
+  <label>Rocket YAML (optional) <input type="file" id="yamlFile" accept=".yaml,.yml"></label>
+  <div id="status">Or drop the files anywhere on the page.</div>
+  <div class="geom">
+    <label>Length m <input type="number" id="length" step="0.01" min="0.01" value="0.9"></label>
+    <label>Diameter m <input type="number" id="diameter" step="0.005" min="0.005" value="0.075"></label>
+    <label>CG station m <input type="number" id="cg" step="0.01" min="0" value="0.5"></label>
+    <label>Pivot station m <input type="number" id="pivot" step="0.01" min="0" value="0.84"></label>
+    <label>Leg span m <input type="number" id="span" step="0.01" min="0.01" value="0.3"></label>
+    <label>Leg height m <input type="number" id="legHeight" step="0.01" min="0" value="0.12"></label>
+    <label>Legs <input type="number" id="legs" step="1" min="1" value="4"></label>
+  </div>
+</div>
+<div id="readout" class="panel">No flight loaded</div>
+<div id="transport" class="panel">
+  <button id="playBtn">Play</button>
+  <input type="range" id="slider" min="0" max="0" value="0" step="1">
+  <select id="speed">
+    <option value="0.25">0.25x</option>
+    <option value="0.5">0.5x</option>
+    <option value="1" selected>1x</option>
+    <option value="2">2x</option>
+    <option value="4">4x</option>
+  </select>
+  <label><input type="checkbox" id="useEst"> Estimated state</label>
+  <label><input type="checkbox" id="follow"> Follow rocket</label>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/js-yaml@4.1.0/dist/js-yaml.min.js"></script>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+  }
+}
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+// ---- pure helpers (no DOM, no three.js) ----
+
+const STATE_KEYS = ['x_m', 'y_m', 'z_m', 'vx_mps', 'vy_mps', 'vz_mps', 'qw', 'qx', 'qy', 'qz'];
+const DEFAULTS = { length: 0.9, diameter: 0.075, cg: 0.5, pivot: 0.84, span: 0.3, legHeight: 0.12, legs: 4 };
+
+function parseCsv(text) {
+  const lines = text.split(/\r?\n/).filter((line) => line.trim() !== '');
+  if (lines.length < 2) throw new Error('no data rows');
+  const columns = lines[0].split(',').map((name) => name.trim());
+  if (!columns.includes('time_s')) throw new Error('no time_s column');
+  const rows = [];
+  for (let i = 1; i < lines.length; i++) {
+    const cells = lines[i].split(',');
+    const row = {};
+    columns.forEach((name, j) => {
+      const cell = (cells[j] ?? '').trim();
+      row[name] = name === 'phase' ? cell : (cell === '' ? NaN : Number(cell));  // "nan" parses to NaN
+    });
+    if (Number.isFinite(row.time_s)) rows.push(row);
+  }
+  if (rows.length === 0) throw new Error('no rows with a finite time_s');
+  return { columns, rows };
+}
+
+// The state block to draw: the preferred one if its position and attitude are finite, otherwise the other.
+function pickState(row, preferEstimate) {
+  for (const prefix of preferEstimate ? ['est', 'true'] : ['true', 'est']) {
+    const s = { source: prefix };
+    for (const key of STATE_KEYS) s[key] = row[`${prefix}_${key}`];
+    if ([s.x_m, s.y_m, s.z_m, s.qw, s.qx, s.qy, s.qz].every(Number.isFinite)) return s;
+  }
+  return null;
+}
+
+// Thrust direction in the body frame for gimbal deflections (pitch, yaw) in radians, unit length.
+function thrustDirection(dp, dy) {
+  const v = [-Math.tan(dp), -Math.tan(dy), 1];
+  const n = Math.hypot(v[0], v[1], v[2]);
+  return v.map((c) => c / n);
+}
+
+// World direction of the body axis b_z: (0, 0, 1) rotated by the unit quaternion (w, x, y, z).
+function bodyAxisWorld(w, x, y, z) {
+  return [2 * (x * z + w * y), 2 * (y * z - w * x), 1 - 2 * (x * x + y * y)];
+}
+
+function tiltDeg(s) {
+  const axis = bodyAxisWorld(s.qw, s.qx, s.qy, s.qz);
+  return Math.acos(Math.min(1, Math.max(-1, axis[2]))) * 180 / Math.PI;
+}
+
+function gimbalAngles(row) {
+  const pick = (act, cmd) => (Number.isFinite(row[act]) ? row[act] : row[cmd]);
+  return { pitch: pick('gimbal_pitch_act_rad', 'gimbal_pitch_cmd_rad'),
+           yaw: pick('gimbal_yaw_act_rad', 'gimbal_yaw_cmd_rad') };
+}
+
+function totalThrust(row) {
+  const a = row.ascent_thrust_n, l = row.landing_thrust_n;
+  return (Number.isFinite(a) ? a : 0) + (Number.isFinite(l) ? l : 0);
+}
+
+function plumeLength(thrustN) {
+  return Math.min(2, 0.02 * Math.max(0, thrustN));
+}
+
+// Foot positions in body coordinates (metres) for a geometry object like DEFAULTS.
+function legFeet(g) {
+  const r = g.span / 2, z = g.cg - g.length - g.legHeight;
+  return Array.from({ length: g.legs }, (_, k) => {
+    const a = 2 * Math.PI * k / g.legs;
+    return [r * Math.cos(a), r * Math.sin(a), z];
+  });
+}
+
+function geometryFromYaml(doc) {
+  const m = (mm) => (Number.isFinite(mm) ? mm / 1000 : undefined);
+  return { length: m(doc?.airframe?.length_mm), diameter: m(doc?.airframe?.reference_diameter_mm),
+           cg: m(doc?.airframe?.dry_cg_from_nose_mm), pivot: m(doc?.gimbal?.pivot_from_nose_mm),
+           span: m(doc?.legs?.span_mm), legHeight: m(doc?.legs?.height_mm),
+           legs: Number.isInteger(doc?.legs?.count) ? doc.legs.count : 4 };
+}
+
+// Largest index whose time is <= t (times ascending), or 0.
+function indexAtTime(times, t) {
+  let lo = 0, hi = times.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1;
+    if (times[mid] <= t) lo = mid; else hi = mid - 1;
+  }
+  return lo;
+}
+
+const fmt = (v, digits = 2) => (Number.isFinite(v) ? v.toFixed(digits) : '--');
+const deg = (rad) => rad * 180 / Math.PI;
+
+// ---- simulator objects (three.js, no DOM) ----
+
+// Simulator frame: x downrange, y crossrange, z up. three.js is y-up. Rotating this group by
+// -90 degrees about x maps simulator (x, y, z) to three.js (x, z, -y), so simulator positions
+// and quaternions are used unchanged on everything inside it. This is the only frame conversion.
+const sim = new THREE.Group();
+sim.rotation.x = -Math.PI / 2;
+
+const grid = new THREE.GridHelper(20, 20, 0x5a6472, 0x3a4150);
+grid.rotation.x = Math.PI / 2;  // GridHelper is built in its local XZ plane; move it to the simulator XY plane
+sim.add(grid);
+const pad = new THREE.Mesh(new THREE.CircleGeometry(0.3, 32),
+                           new THREE.MeshBasicMaterial({ color: 0x6e6e6e, side: THREE.DoubleSide }));
+pad.position.z = 0.002;
+sim.add(pad);
+sim.add(new THREE.AxesHelper(0.5));  // red x downrange, green y crossrange, blue z up
+
+const rocket = new THREE.Group();  // at the centre of gravity, rotated by the attitude quaternion
+sim.add(rocket);
+let gimbal = new THREE.Group();    // at the pivot; its local +z is the thrust direction, -z the exhaust
+let plume = null;
+
+const bodyMat = new THREE.MeshStandardMaterial({ color: 0xd8dde6, roughness: 0.6 });
+const legMat = new THREE.MeshStandardMaterial({ color: 0x3a414c });
+const nozzleMat = new THREE.MeshStandardMaterial({ color: 0x555555, metalness: 0.5 });
+const plumeMat = new THREE.MeshBasicMaterial({ color: 0xffa040, transparent: true, opacity: 0.75 });
+const Z_AXIS = new THREE.Vector3(0, 0, 1);
+
+// Cylinder and cone geometries are built along +y. Rotate them onto the body z axis (tail to
+// nose) and shift so that the geometry centre sits at body z = cg - station.
+function alongAxis(geometry, centreStation, g) {
+  return geometry.rotateX(Math.PI / 2).translate(0, 0, g.cg - centreStation);
+}
+
+function strut(a, b, radius, material) {
+  const start = new THREE.Vector3(...a), end = new THREE.Vector3(...b);
+  const dir = end.clone().sub(start);
+  const mesh = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius, dir.length(), 6), material);
+  mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.clone().normalize());
+  mesh.position.copy(start).addScaledVector(dir, 0.5);
+  return mesh;
+}
+
+function buildRocket(g) {
+  rocket.traverse((o) => o.geometry?.dispose());
+  rocket.clear();
+  const r = g.diameter / 2;
+  const noseLen = Math.min(3 * g.diameter, g.length / 3);
+  rocket.add(new THREE.Mesh(alongAxis(new THREE.ConeGeometry(r, noseLen, 24), noseLen / 2, g), bodyMat));
+  rocket.add(new THREE.Mesh(alongAxis(new THREE.CylinderGeometry(r, r, g.length - noseLen, 24),
+                                      (noseLen + g.length) / 2, g), bodyMat));
+  const hingeStation = g.length - Math.min(0.1, 0.15 * g.length);
+  for (const foot of legFeet(g)) {
+    const a = Math.atan2(foot[1], foot[0]);
+    rocket.add(strut([r * Math.cos(a), r * Math.sin(a), g.cg - hingeStation], foot, 0.004, legMat));
+    const shoe = new THREE.Mesh(new THREE.SphereGeometry(0.01, 8, 8), legMat);
+    shoe.position.set(...foot);
+    rocket.add(shoe);
+  }
+  gimbal = new THREE.Group();
+  gimbal.position.z = g.cg - g.pivot;
+  const nozzleLen = 0.6 * g.diameter;  // throat at the pivot, exit toward -z
+  gimbal.add(new THREE.Mesh(new THREE.CylinderGeometry(0.25 * g.diameter, 0.4 * g.diameter, nozzleLen, 16)
+                              .rotateX(Math.PI / 2).translate(0, 0, -nozzleLen / 2), nozzleMat));
+  // Unit-length cone with its base at the pivot and its tip on local -z; scale.z sets the length.
+  plume = new THREE.Mesh(new THREE.ConeGeometry(0.35 * g.diameter, 1, 16, 1, true)
+                           .rotateX(-Math.PI / 2).translate(0, 0, -0.5), plumeMat);
+  plume.visible = false;
+  gimbal.add(plume);
+  rocket.add(gimbal);
+}
+
+function poseRocket(row, s) {
+  if (s) {
+    rocket.position.set(s.x_m, s.y_m, s.z_m);
+    rocket.quaternion.set(s.qx, s.qy, s.qz, s.qw).normalize();
+  }
+  const ga = gimbalAngles(row);
+  gimbal.quaternion.setFromUnitVectors(Z_AXIS, new THREE.Vector3(...thrustDirection(ga.pitch || 0, ga.yaw || 0)));
+  const length = plumeLength(totalThrust(row));
+  plume.visible = length > 0.005;
+  plume.scale.z = Math.max(length, 0.001);
+  return ga;
+}
+
+function buildTrail(rows, preferEstimate) {
+  const positions = new Float32Array(rows.length * 3);
+  let last = null, filled = 0;
+  rows.forEach((row, i) => {
+    const s = pickState(row, preferEstimate);
+    if (s) last = [s.x_m, s.y_m, s.z_m];
+    while (last && filled <= i) positions.set(last, 3 * filled++);  // also back-fills rows before the first valid state
+  });
+  const geometry = new THREE.BufferGeometry().setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  return new THREE.Line(geometry, new THREE.LineBasicMaterial({ color: 0x4fc3f7 }));
+}
+
+// ---- page ----
+
+const ids = ['csvFile', 'yamlFile', 'status', 'readout', 'playBtn', 'slider', 'speed', 'useEst', 'follow'];
+const ui = Object.fromEntries(ids.map((id) => [id, document.getElementById(id)]));
+const geomInputs = Object.fromEntries(Object.keys(DEFAULTS).map((key) => [key, document.getElementById(key)]));
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(window.devicePixelRatio);
+renderer.setSize(window.innerWidth, window.innerHeight);
+document.body.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x1b1f26);
+scene.add(sim);
+scene.add(new THREE.HemisphereLight(0xdfe8ff, 0x303030, 1.2));
+const sun = new THREE.DirectionalLight(0xffffff, 1.5);
+sun.position.set(4, 8, 2);
+scene.add(sun);
+const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.01, 1000);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+
+let flight = null, trail = null, simTime = 0, playing = false, currentIndex = -1;
+let lastFrame = performance.now();
+const tmpA = new THREE.Vector3(), tmpB = new THREE.Vector3();
+
+function readGeometry() {
+  const g = {};
+  for (const [key, el] of Object.entries(geomInputs)) {
+    const v = Number(el.value);
+    g[key] = v > 0 ? v : DEFAULTS[key];
+  }
+  g.legs = Math.max(1, Math.round(g.legs));
+  return g;
+}
+
+function rebuildRocket() {
+  const g = readGeometry();
+  buildRocket(g);
+  if (!flight) rocket.position.set(0, 0, g.length + g.legHeight - g.cg);  // feet on the pad
+  currentIndex = -1;
+}
+
+function frameCamera(extent) {
+  camera.position.set(1.6 * extent, 0.9 * extent, 1.6 * extent);
+  controls.target.set(0, 0.25 * extent, 0);
+}
+
+function setPlaying(flag) {
+  playing = flag;
+  ui.playBtn.textContent = flag ? 'Pause' : 'Play';
+}
+
+function togglePlay() {
+  if (!flight) return;
+  if (!playing && simTime >= flight.tEnd) simTime = 0;
+  setPlaying(!playing);
+}
+
+function replaceTrail() {
+  if (trail) { sim.remove(trail); trail.geometry.dispose(); }
+  trail = buildTrail(flight.rows, ui.useEst.checked);
+  sim.add(trail);
+  currentIndex = -1;
+}
+
+function showRow(index) {
+  const row = flight.rows[index];
+  const s = pickState(row, ui.useEst.checked);
+  const ga = poseRocket(row, s);
+  trail.geometry.setDrawRange(0, index + 1);
+  ui.slider.value = index;
+  const speed = s ? Math.hypot(s.vx_mps, s.vy_mps, s.vz_mps) : NaN;
+  ui.readout.textContent = [
+    `time    ${fmt(row.time_s, 3)} s`,
+    `phase   ${row.phase || '--'}`,
+    `state   ${s ? s.source : 'none'}`,
+    `alt     ${fmt(s?.z_m)} m`,
+    `speed   ${fmt(speed)} m/s`,
+    `tilt    ${fmt(s ? tiltDeg(s) : NaN, 1)} deg`,
+    `gimbal  ${fmt(deg(ga.pitch))} / ${fmt(deg(ga.yaw))} deg`,
+    `thrust  ${fmt(totalThrust(row), 1)} N`,
+  ].join('\n');
+}
+
+async function loadCsv(file) {
+  try {
+    const { columns, rows } = parseCsv(await file.text());
+    flight = { rows, times: rows.map((row) => row.time_s), tEnd: rows[rows.length - 1].time_s };
+    ui.slider.max = rows.length - 1;
+    simTime = 0;
+    setPlaying(false);
+    replaceTrail();
+    let extent = 1;
+    for (const row of rows) {
+      const s = pickState(row, false);
+      if (s) extent = Math.max(extent, Math.abs(s.x_m), Math.abs(s.y_m), s.z_m);
+    }
+    frameCamera(extent);
+    const missing = ['true_x_m', 'true_z_m', 'true_qw'].filter((name) => !columns.includes(name));
+    ui.status.textContent = `${file.name}: ${rows.length} rows, ${fmt(flight.tEnd, 2)} s`
+      + (missing.length ? `. Missing columns: ${missing.join(', ')}` : '');
+  } catch (err) {
+    ui.status.textContent = `Could not read ${file.name}: ${err.message}`;
+  }
+}
+
+async function loadYaml(file) {
+  try {
+    const g = geometryFromYaml(globalThis.jsyaml.load(await file.text()));
+    for (const [key, el] of Object.entries(geomInputs)) if (g[key] !== undefined) el.value = g[key];
+    rebuildRocket();
+    ui.status.textContent = `Rocket geometry from ${file.name}`;
+  } catch (err) {
+    ui.status.textContent = `Could not read ${file.name}: ${err.message}`;
+  }
+}
+
+function animate(now) {
+  requestAnimationFrame(animate);
+  const dt = (now - lastFrame) / 1000;
+  lastFrame = now;
+  if (flight) {
+    if (playing) {
+      simTime += dt * Number(ui.speed.value);
+      if (simTime >= flight.tEnd) { simTime = flight.tEnd; setPlaying(false); }
+    }
+    const index = indexAtTime(flight.times, simTime);
+    if (index !== currentIndex) { currentIndex = index; showRow(index); }
+    if (ui.follow.checked) {  // move camera and target together so the view offset is kept
+      rocket.getWorldPosition(tmpA);
+      camera.position.add(tmpB.subVectors(tmpA, controls.target));
+      controls.target.copy(tmpA);
+    }
+  }
+  controls.update();
+  renderer.render(scene, camera);
+}
+
+ui.csvFile.addEventListener('change', (e) => { if (e.target.files[0]) loadCsv(e.target.files[0]); });
+ui.yamlFile.addEventListener('change', (e) => { if (e.target.files[0]) loadYaml(e.target.files[0]); });
+document.addEventListener('dragover', (e) => e.preventDefault());
+document.addEventListener('drop', (e) => {
+  e.preventDefault();
+  for (const file of e.dataTransfer.files) (/\.ya?ml$/i.test(file.name) ? loadYaml : loadCsv)(file);
+});
+ui.playBtn.addEventListener('click', togglePlay);
+document.addEventListener('keydown', (e) => {
+  if (e.code === 'Space' && e.target === document.body) { e.preventDefault(); togglePlay(); }
+});
+ui.slider.addEventListener('input', () => { if (flight) simTime = flight.times[Number(ui.slider.value)]; });
+ui.useEst.addEventListener('change', () => { if (flight) replaceTrail(); });
+for (const el of Object.values(geomInputs)) el.addEventListener('change', rebuildRocket);
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+rebuildRocket();
+frameCamera(1.5);
+requestAnimationFrame(animate);
+</script>
+</body>
+</html>

@@ -1,0 +1,18 @@
+# Simulation environment and training settings.
+# Stage 1 uses the simulation, environment and wind sections. Later stages add more.
+
+simulation:
+  physics_rate_hz: 200
+  max_flight_time_s: 60.0
+
+environment:
+  site_elevation_m: 300.0
+  gravity_mps2: 9.80665
+  sea_level_density_kgpm3: 1.225
+  scale_height_m: 8500.0
+
+wind:
+  steady_mps: 0.0
+  steady_direction_deg: 0.0   # direction the wind blows toward, from +x toward +y
+  gust_std_mps: 0.0
+  gust_time_constant_s: 2.0

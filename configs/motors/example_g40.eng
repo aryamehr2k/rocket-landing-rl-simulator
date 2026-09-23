@@ -1,0 +1,15 @@
+; Stand-in ascent motor for the example rocket. Not a real motor.
+; Replace with the .eng file of the motor you actually fly, from ThrustCurve.org.
+; Header: name diameter_mm length_mm delays propellant_mass_kg total_mass_kg manufacturer
+EXAMPLE_G40 29 124 0 0.0620 0.1250 Example
+0.02 30.0
+0.05 55.0
+0.10 52.0
+0.30 48.0
+0.60 45.0
+1.00 42.0
+1.50 38.0
+1.90 34.0
+2.05 15.0
+2.15 0.0
+;

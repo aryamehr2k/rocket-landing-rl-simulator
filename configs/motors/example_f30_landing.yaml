@@ -1,0 +1,24 @@
+# Stand-in landing motor for the example rocket. Not a real motor.
+# Replace the curve with the measured thrust curve of the motor you fly.
+name: EXAMPLE_F30_LANDING
+propellant_mass_g: 42
+total_mass_g: 110
+diameter_mm: 29
+length_mm: 110
+throttleable: false
+throttle_lag_s: 0.0
+# Default ignition delay for this motor and igniter. The rocket file may override it.
+ignition_delay_s:
+  mean: 0.15
+  spread: 0.08
+# [time_s, thrust_n] pairs, times strictly increasing, last thrust zero.
+thrust_curve:
+  - [0.00, 0.0]
+  - [0.05, 25.0]
+  - [0.15, 40.0]
+  - [0.40, 36.0]
+  - [1.00, 32.0]
+  - [1.80, 29.0]
+  - [2.40, 26.0]
+  - [2.60, 12.0]
+  - [2.75, 0.0]

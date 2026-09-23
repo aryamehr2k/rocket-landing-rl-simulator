@@ -1,0 +1,67 @@
+# Example thrust vector controlled rocket, about 1.4 kg on the pad.
+# Every number here is a stand-in. Replace them with values measured from your rocket,
+# OpenRocket, a scale and the real motor files before trusting any result.
+# Positions are stations from the nose tip toward the tail. See docs/conventions.md.
+
+name: example_tvc
+
+airframe:
+  dry_mass_g: 1200.0             # everything except the motors
+  dry_cg_from_nose_mm: 450.0     # centre of gravity of the rocket without motors
+  dry_pitch_inertia_kgm2: 0.085  # about a lateral axis through the dry centre of gravity
+  dry_roll_inertia_kgm2: 0.0015  # about the body axis
+  length_mm: 900.0               # nose tip to tail end of the airframe
+  reference_diameter_mm: 75.0
+
+aero:
+  drag_coefficient: 0.60
+  normal_force_slope_per_rad: 2.0   # mostly nose cone lift, only vestigial fins
+  cp_from_nose_mm: 480.0            # a little ahead of the burnout CG on purpose, see README
+
+motors:
+  ascent:
+    file: ../motors/example_g40.eng
+    position_from_nose_mm: 810.0  # centre of mass of the motor
+    gimbaled: true
+    ignition_delay_s: {mean: 0.10, spread: 0.05}
+  landing:
+    file: ../motors/example_f30_landing.yaml
+    position_from_nose_mm: 690.0
+    gimbaled: true
+    ignition_delay_s: {mean: 0.15, spread: 0.08}
+
+gimbal:
+  pivot_from_nose_mm: 840.0
+  max_angle_deg: 7.0
+  servo_rate_limit_deg_per_s: 300.0
+  servo_delay_s: 0.020
+  servo_deadband_deg: 0.2
+  servos:
+    pitch:                        # leans the nose toward +x for a positive command
+      center_us: 1500
+      pulse_us_per_deg: 10.0      # pulse change per degree of servo travel
+      sign: 1                     # -1 if the servo is mounted the other way round
+      linkage_ratio: 0.5          # gimbal angle per servo angle
+      pulse_resolution_us: 1
+      min_us: 1000
+      max_us: 2000
+    yaw:                          # leans the nose toward +y for a positive command
+      center_us: 1500
+      pulse_us_per_deg: 10.0
+      sign: 1
+      linkage_ratio: 0.5
+      pulse_resolution_us: 1
+      min_us: 1000
+      max_us: 2000
+
+legs:
+  span_mm: 300.0                  # diameter of the circle through the feet
+  height_mm: 120.0                # feet plane below the tail end of the airframe
+  count: 4
+  max_touchdown_vertical_speed_mps: 2.0
+  max_touchdown_lateral_speed_mps: 1.0
+  max_touchdown_tilt_deg: 10.0
+
+control:
+  control_rate_hz: 50
+  action_delay_steps: 1
