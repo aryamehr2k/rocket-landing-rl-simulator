@@ -1,6 +1,6 @@
 import math
 
-from rocketsim.units import split_unit_suffix, to_si
+from rocketsim.units import MS_PER_S, kg_to_g, split_unit_suffix, to_si
 
 
 def test_suffix_conversions() -> None:
@@ -27,3 +27,8 @@ def test_longest_suffix_wins() -> None:
 def test_unknown_suffix_is_left_alone() -> None:
     assert to_si("drag_coefficient", 0.6) == 0.6
     assert split_unit_suffix("sign")[0] == "sign"
+
+
+def test_back_conversions_for_printing() -> None:
+    assert kg_to_g(0.093) == 93.0
+    assert 0.03 * MS_PER_S == 30.0

@@ -12,6 +12,7 @@ import numpy as np
 from rocketsim import quaternion
 from rocketsim.aero import aerodynamic_loads, air_density
 from rocketsim.config import RocketConfig
+from rocketsim.dragdevice import device_loads
 from rocketsim.simconfig import EnvironmentConfig
 from rocketsim.touchdown import TouchdownResult, grade_touchdown, lowest_point, tip_over_angle
 
@@ -60,6 +61,7 @@ class Inputs:
 
     gimbal_pitch: float = 0.0
     gimbal_yaw: float = 0.0
+    brake_fraction: float = 0.0
     wind: np.ndarray = field(default_factory=lambda: np.zeros(2))
     motors: list[MotorInputs] = field(default_factory=list)
 
@@ -82,6 +84,7 @@ class RocketDynamics:
         self.stations = np.array([motor.position for motor in rocket.motors])
         self.motor_radii = np.array([motor.spec.diameter * HALF for motor in rocket.motors])
         self.area = rocket.reference_area
+        self.device = rocket.drag_device
 
     def new_inputs(self) -> Inputs:
         return Inputs(motors=[MotorInputs() for _ in self.motors])
@@ -127,6 +130,12 @@ class RocketDynamics:
         density = air_density(y[IZ], self.environment)
         loads = aerodynamic_loads(self.rocket.aero, self.area, density, airspeed_body, props.cg)
         force, moment = loads.force.copy(), loads.moment.copy()
+        if self.device is not None and inputs.brake_fraction > 0.0:
+            device_force, device_moment = device_loads(
+                self.device, inputs.brake_fraction, density, airspeed_body, omega, props.cg
+            )
+            force += device_force
+            moment += device_moment
 
         pivot = np.array([0.0, 0.0, props.cg - self.rocket.gimbal.pivot])
         direction = thrust_direction(inputs.gimbal_pitch, inputs.gimbal_yaw)
@@ -146,6 +155,17 @@ class RocketDynamics:
         dy[IQ] = quaternion.derivative(q, omega)
         dy[IW] = (moment - np.cross(omega, inertia * omega)) / inertia
         return dy
+
+    def device_drag(self, y: np.ndarray, inputs: Inputs) -> float:
+        """Magnitude of the drag device force in the current state, for the log."""
+        if self.device is None or inputs.brake_fraction <= 0.0:
+            return 0.0
+        rotation = quaternion.to_matrix(y[IQ])
+        wind = np.array([inputs.wind[0], inputs.wind[1], 0.0])
+        airspeed_body = rotation.T @ (y[IVEL] - wind)
+        density = air_density(y[IZ], self.environment)
+        force, _ = device_loads(self.device, inputs.brake_fraction, density, airspeed_body, y[IW], self.mass_properties(y).cg)
+        return float(np.linalg.norm(force))
 
     def _mass_flow(self, index: int, t: float, y: np.ndarray, inputs: Inputs) -> float:
         # Follows the thrust curve; the random thrust scale does not change it.

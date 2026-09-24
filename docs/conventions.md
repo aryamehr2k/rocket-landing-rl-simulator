@@ -23,6 +23,7 @@ value is in and `rocketsim/units.py` converts it when the file is loaded:
 | `_s`           | seconds                       | seconds                 |
 | `_mps`, `_mps2`| metres per second (squared)   | unchanged               |
 | `_us`          | microseconds                  | microseconds            |
+| `_cm2`         | square centimetres            | square metres           |
 | `_kgm2`, `_hz`, `_n`, `_kgpm3`, `_per_rad` | already SI | unchanged     |
 
 Rules:
@@ -156,8 +157,38 @@ Rules:
   therefore needs `x_cp <= x_cg` at ascent burnout, or a burn that starts before the tilt
   has had time to grow. Static margins must be judged at the burnout centre of gravity, which
   is ahead of the loaded one because the motors sit at the tail.
-- No aerodynamic pitch damping and no roll damping or roll torque are modelled yet, so roll
-  stays at whatever rate it starts with.
+- No aerodynamic pitch damping from the body and no roll damping or roll torque are modelled,
+  so roll stays at whatever rate it starts with. The drag device below is the only damping.
+
+## Drag device
+
+An optional `drag_device` section describes a deployable brake (petals or flaps) as an ideal
+drag area at one station. It is opened by a fraction `f` in `[0, 1]`; `0` is shut and adds
+nothing, so a rocket without the section behaves exactly as before.
+
+- `drag_area_cm2` is `Cd * A` of the fully open device on top of the body's drag; a flat plate
+  has `Cd` about 1.2. `station_from_nose_mm` is where its force acts. `deploy_time_s` and
+  `retract_time_s` are the times to open fully and to shut.
+- The device sits at body position `r = (0, 0, x_cg - x_station)` relative to the centre of
+  gravity. Its relative wind is the local one, `v_loc = v_rel_body + omega cross r`, so a
+  rocket that turns feels the device resist the turn (pendulum damping).
+- Force `F = -0.5 * rho * CdA * f * |v_loc| * v_loc` in body axes, moment `r cross F`.
+- Sign of the moment for a tail-first fall: a device ahead of the centre of gravity (smaller
+  station, toward the nose, the trailing end when falling) gives a restoring moment like the
+  feathers of a shuttlecock; a device behind it (larger station, the legs) gives a diverging one
+  and flips the rocket during the unpowered coast. The safety layer refuses to open a device
+  behind the descent centre of gravity outside `LANDING_BURN`.
+- The descent centre of gravity `descent_cg` is that of dry mass, empty ascent case and full
+  landing motor; `descent_mass` is their sum. Both are properties of the rocket config.
+- Terminal speed: with the device open the fall stops accelerating where drag equals weight,
+  `v_t = sqrt(m g / k)` with `k = 0.5 rho (Cd_body S + CdA_device f)`. The device area for a
+  wanted `v_t` is `CdA_total = 2 m g / (rho v_t^2)`; `rocketsim/dragdevice.py` has both.
+- The actuator (`BrakeServo` in `actuators.py`) takes the fraction once per control step after
+  the action delay, applies the gimbal servo's pure delay, then moves at `1 / deploy_time_s`
+  per second opening and `1 / retract_time_s` closing, once per physics step. The log records
+  the actual `brake_fraction` and the device force `device_drag_n`.
+- `ControlCommand.brake_fraction` is the flight computer's command; a policy may set
+  `PlaneAction.brake` to override the rules below, `None` leaves them in charge.
 
 ## Mass properties
 
@@ -184,6 +215,18 @@ Rules:
   its propellant is gone or when the curve ends, whichever comes first.
 - A random thrust scale from the training YAML multiplies thrust but not mass flow, so it
   models uncertainty in the total impulse per gram of propellant.
+
+## Hidden errors per flight
+
+The training YAML's optional `randomize` section lists uniform ranges `[low, high]` that
+`Simulation.reset` draws once per flight from the seeded generator, before anything else:
+`landing_thrust_scale` and `ascent_thrust_scale` (thrust scales as above), `dry_mass_g`
+(added to the airframe dry mass) and `device_drag_area_scale` (multiplies the device
+`Cd*A`). The physics flies the rocket with these errors: `Simulation.reset` builds a new
+`RocketDynamics` from the drawn rocket every flight, so `sim.dynamics` must be read after the
+reset, never cached across flights. The flight computer, its trigger table and its sensors keep
+the nominal rocket file. Without the section nothing is drawn and the generator is untouched, so
+older seeds reproduce. `rocketsim/randomize.py` holds the draw.
 
 ## Ground, pad and touchdown
 
@@ -300,17 +343,62 @@ For a solid landing motor the only decision is when to send the igniter command.
 - At start-up the flight computer integrates the landing burn in one dimension for every
   downward speed from 0 to 80 m/s in 0.5 m/s steps: thrust from the curve times
   `thrust_margin`, mass `dry + empty ascent case + full landing motor` minus propellant burned
-  along the curve, gravity, and drag with the air density at ground level. The distance
-  fallen until the speed drops to `target_speed_mps` (or the motor burns out) plus
-  `target_height_m` is the required height for that speed.
+  along the curve, gravity, and drag with the air density at ground level. The drag counts the
+  body and the drag device at the opening `brake.burn_fraction` it will have during the burn.
+  The distance fallen until the speed drops to `target_speed_mps` (or the motor burns out) plus
+  `target_height_m` is the required height for that speed. `integrate_burn` in
+  `landing_trigger.py` is that integration, vectorised, and the design tool reuses it.
 - The table is consulted in `DESCENT` only. The command goes out when the height and speed the
   rocket will have when thrust starts,
   `delay = igniter mean delay + (action_delay_steps + 0.5) * control period` from now, satisfy
-  `height_then <= required(speed_then)`.
+  `height_then <= required(speed_then)`. The speed then is predicted with gravity and the drag
+  at the current device opening, `speed_then = v + (g - k v^2 / m) * delay`, and the height with
+  the mean of the two speeds. At terminal speed the prediction is `v` itself; without the drag
+  term it would add `g * delay`, about 1.8 m/s, and the trigger would fire metres too early.
+- `thrust_margin` may be up to 1.10. Above 1 the table assumes a motor stronger than the curve
+  and lights later. A motor weaker than the table assumes leaves a little speed the tail can
+  absorb; a stronger one stops the rocket too high and it climbs, which the tail cannot undo.
+  Setting the margin at the strongest motor of a measured batch therefore fails safe.
+- `can_reach_target_from` is the highest speed the burn can bring down to the target before
+  burnout. Above it the table keeps the required height of that edge instead of the whole
+  burn's fall distance (which would fire tens of metres early on speed noise), so the hard
+  part still ends as low as it can with the least speed left. The trigger warns at start-up
+  when the expected arrival speed (the terminal speed with the device open) is within 1 m/s
+  of the edge, because a burn beyond it leaves speed the tail cannot remove.
+- `calibrate_drag_in_flight: true` makes the trigger fit the drag from the accelerometer once
+  the device has been fully open for its deploy time plus the servo delay. Falling tail first
+  without thrust, the body axis specific force is the drag over the mass, `f = (k / m) v^2
+  cos(tilt)` with `v` the estimated descent speed, so a least squares fit of `f` against
+  `v^2 cos(tilt)` over 1 s of control steps gives `k / m` without waiting for terminal speed.
+  Samples below 12 m/s or beyond 20 degrees of tilt are skipped. The device drag becomes
+  `m k/m` minus the body drag, and the table is rebuilt for speeds within 5 m/s of the new
+  terminal speed. `FlightComputer.reset` restores the nominal drag and table. In the simulator
+  the fit lands within about 2 % of the true drag area in calm air and reads about 4 % high in
+  a 4 m/s wind, because the airspeed is more than the descent speed. It corrects where the
+  trigger fires, not the motor's impulse: with the brake area 15 % below or above the file the
+  example landed 19 and 14 of 20 with the fit against 17 and 9 without, and a hard part that
+  cannot stop the arrival speed is still not rescued. The example leaves it off.
 - A solid cannot be throttled, so this only works when the hard part of the burn can take
   the descent speed at the crossing down to the target speed with a small margin. Too little
   impulse leaves speed the tail cannot remove; too much stops the rocket in the air and it
-  climbs on the leftover thrust. Matching that impulse is part of the rocket design.
+  climbs on the leftover thrust. Matching that impulse is part of the rocket design; with a
+  drag device the arrival speed is the terminal speed whatever the apogee, and
+  `scripts/design_landing_burn.py` sizes the hard part for it.
+
+## Brake rules
+
+The `brake` section of the rocket YAML (needs a `drag_device`) tells the flight computer when
+to move the device. It keeps two latches, `deployed` and `retracted`, reset with the flight.
+
+- In `DESCENT`: once the estimated descent speed exceeds `deploy_descent_speed_mps` the device
+  opens fully and stays open. Waiting for that speed instead of opening at apogee keeps the
+  horizontal relative wind from swinging the rocket while it is still slow.
+- In `LANDING_BURN`, if it was deployed: the opening is `burn_fraction` until the estimated
+  descent speed drops below `retract_descent_speed_mps` (the hand-over from the hard part to
+  the tail), then the device shuts and stays shut so the wind cannot push on it during the
+  slow sink. `burn_fraction` is what the trigger table assumes during the burn.
+- In every other phase the command is 0. A `PlaneAction.brake` that is not `None` replaces
+  the rule's output; the safety layer still applies.
 
 ## PID baseline
 
@@ -336,6 +424,8 @@ Applied to every command, PID or policy, before it reaches the actuators:
   `landing_ignition_lockout_s` after liftoff, with the estimated tilt at most
   `max_landing_ignition_tilt_deg` and the estimated feet height at most
   `max_landing_ignition_height_m`.
+- The brake fraction is clipped to `[0, 1]`. A device may only open in `DESCENT` or
+  `LANDING_BURN`, and a device behind the descent centre of gravity only in `LANDING_BURN`.
 - In `ABORT` everything is zero and nothing ignites.
 
 ## Actuators
@@ -345,6 +435,39 @@ Applied to every command, PID or policy, before it reaches the actuators:
   advance once per physics step, so the actual gimbal angle changes every physics step.
 - An igniter command starts the motor after a delay drawn once per flight, uniform in
   `mean +- spread` and never negative. A second command to the same motor does nothing.
+- The brake servo is described in the Drag device section.
+
+## Burn summary
+
+`Simulation.burn_summary` collects, from the true state, the numbers that explain a touchdown
+speed: the time of the igniter command and the estimator's height and speed errors at that
+instant (estimate minus truth, feet height from the lowest point of the rocket), the height and
+speed when thrust started, the stop height (feet height when the descent first dropped below
+`target_speed_mps` during the burn), the climb after that stop, and the burn time left at
+touchdown. `scripts/fly_scripted.py` prints it.
+
+## One dimensional design model
+
+`rocketsim/landing_design.py` and `rocketsim/landing_montecarlo.py` size a brake and a burn
+and estimate the landing rate without the six degree of freedom physics. They use the same
+gravity, ground level air density, body and device drag, thrust curve, mass flow and trigger
+as the flight computer, in the vertical axis only: no wind, tilt or lateral speed. The
+Monte Carlo runs many flights at once from apogee with the brake rules and the trigger on
+noisy estimates, each flight with its own igniter delay, thrust scale, mass and device area
+error. Its landing rate is an upper bound on the simulator's, which adds the attitude motion.
+
+`rocketsim/landing_sensitivity.py` holds the closed forms the design tool prints next to that
+model. The stop point is where the hard part has brought the descent to the target speed. Its
+shift per error is `v dt` for a timing error, `d s (a + g) / a` for a relative thrust or mass
+error `s` (with `d` the stopping distance and `a = v^2 / (2 d)` the mean deceleration) and
+`sigma_v v / a` for a speed estimate error. The touchdown speed for a shift starts from the
+nominal model flight: the stop height `h0`, the climb `c` on the rest of the hard ramp and the
+effective tail sink acceleration `a_t = v_td^2 / (2 (h0 + c))`. A stop lower by `delta` sinks
+from `h0 - delta + c`; below the ground it is `sqrt(v_t^2 + 2 a_end (delta - h0))` with `a_end`
+the deceleration at the end of the hard part. A stop higher by `delta` sinks from
+`h0 + delta + c` while the tail lasts and falls freely after burnout. The closed forms keep
+the climb and the 20 ms control step nominal, so where they disagree with the model run with
+that single error, the model is right; the tool prints both.
 
 ## State vector layout in code
 

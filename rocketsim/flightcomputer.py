@@ -7,6 +7,7 @@ still apply to it. See docs/conventions.md.
 
 from rocketsim.commands import ControlCommand, PlaneAction
 from rocketsim.config import RocketConfig
+from rocketsim.dragdevice import FULLY_OPEN, SHUT
 from rocketsim.estimator import Estimate, Estimator
 from rocketsim.landing_trigger import LandingTrigger
 from rocketsim.phases import CONTROLLED_PHASES, Phase, PhaseMachine
@@ -35,15 +36,20 @@ class FlightComputer:
             decision_latency=(rocket.control.action_delay_steps + HALF_STEP) * control_dt,
         )
         self.pid = TvcController(computer.pid)
-        self.safety = Safety(computer.safety, rocket.gimbal)
+        self.safety = Safety(computer.safety, rocket.gimbal, rocket.drag_device, rocket.descent_cg)
+        self.brake = computer.brake
         self.reset()
 
     def reset(self) -> None:
         self.estimator.reset()
         self.phases.reset()
         self.pid.reset()
+        self.trigger.reset()
         self.specific_force_bz = 0.0
         self.launched = False
+        self.brake_deployed = False
+        self.brake_deployed_at: float | None = None
+        self.brake_retracted = False
         self.refusals: tuple[str, ...] = ()
         self.command = ControlCommand()
 
@@ -83,12 +89,21 @@ class FlightComputer:
             pitch, yaw = world_to_servo(delta_x, delta_y, estimate.roll)
         else:
             self.pid.reset()
+        speed_down = -float(estimate.velocity[2])
+        brake = self.brake_rule(phase, speed_down)
+        if action is not None and action.brake is not None:
+            brake = action.brake
+        if self.brake_deployed and self.brake_deployed_at is None:
+            self.brake_deployed_at = t
         if action is not None:
             ignite_landing = action.ignite_landing  # safety decides whether this phase allows it
         else:
-            speed_down = -float(estimate.velocity[2])
-            ignite_landing = phase == Phase.DESCENT and self.trigger.should_ignite(self.height, speed_down)
-        wanted = ControlCommand(pitch, yaw, ignite_ascent, ignite_landing)
+            if phase == Phase.DESCENT and self.brake_fully_open(t):
+                self.trigger.observe_descent(t, speed_down, self.specific_force_bz, estimate.total_tilt)
+            ignite_landing = phase == Phase.DESCENT and self.trigger.should_ignite(
+                self.height, speed_down, self.command.brake_fraction
+            )
+        wanted = ControlCommand(pitch, yaw, ignite_ascent, ignite_landing, brake)
         command, self.refusals = self.safety.filter(wanted, phase, t, self.phases.liftoff_time, estimate, self.height)
         if command.ignite_ascent:
             self.launched = True
@@ -96,6 +111,29 @@ class FlightComputer:
             self.phases.landing_commanded(t)
         self.command = command
         return command
+
+    def brake_fully_open(self, t: float) -> bool:
+        """True once the device has had its deploy time plus the servo delay since the open command."""
+        device = self.rocket.drag_device
+        if device is None or self.brake_deployed_at is None:
+            return False
+        latency = self.rocket.control.action_delay_steps * self.control_dt + self.rocket.gimbal.servo_delay
+        return t - self.brake_deployed_at >= device.deploy_time + latency
+
+    def brake_rule(self, phase: Phase, speed_down: float) -> float:
+        """Drag device opening from the rules: open once falling fast enough, hold in the burn, shut at hand-over."""
+        rules = self.brake
+        if rules is None:
+            return SHUT
+        if phase == Phase.DESCENT:
+            if speed_down > rules.deploy_descent_speed:
+                self.brake_deployed = True
+            return FULLY_OPEN if self.brake_deployed else SHUT
+        if phase == Phase.LANDING_BURN and self.brake_deployed:
+            if speed_down < rules.retract_descent_speed:
+                self.brake_retracted = True
+            return SHUT if self.brake_retracted else rules.burn_fraction
+        return SHUT
 
     def landed(self, t: float) -> None:
         self.phases.landed(t)

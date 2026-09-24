@@ -121,3 +121,61 @@ def test_missing_file_and_bad_top_level(tmp_path: Path) -> None:
     bad.write_text("- 1\n- 2\n")
     with pytest.raises(ConfigError, match="top level must be a mapping"):
         load_sim_config(bad)
+
+
+def test_example_rocket_has_the_brake_and_the_freefall_copy_has_none() -> None:
+    rocket = load_rocket_config(EXAMPLE_ROCKET)
+    assert rocket.drag_device is not None and rocket.drag_device.drag_area == pytest.approx(0.0566)
+    assert rocket.computer.brake is not None
+    assert (rocket.computer.brake.deploy_descent_speed, rocket.computer.brake.retract_descent_speed) == (8.0, 3.0)
+    assert rocket.descent_cg == pytest.approx(0.494, abs=0.002)
+    freefall = load_rocket_config(EXAMPLE_ROCKET.parent / "example_tvc_freefall.yaml")
+    assert freefall.drag_device is None and freefall.computer.brake is None
+    assert freefall.motor("landing").spec.name == "EXAMPLE_G120_LANDING"
+
+
+@pytest.mark.parametrize(
+    "change, message",
+    [
+        (lambda d: d.pop("drag_device"), "brake needs a drag_device"),
+        (lambda d: d["landing_trigger"].__setitem__("thrust_margin", 1.2), "thrust_margin must be <= 1.1"),
+        (lambda d: d["brake"].__setitem__("retract_descent_speed_mps", 9.0), "below deploy_descent_speed_mps"),
+        (lambda d: d["drag_device"].__setitem__("drag_area_m2", 0.05), "not a known setting"),
+        (lambda d: d["drag_device"].__setitem__("station_from_nose_mm", 950.0), "station_from_nose_mm must be <= 900"),
+    ],
+)
+def test_brake_validation_errors(tmp_path: Path, change: Change, message: str) -> None:
+    def apply(data: dict) -> None:
+        with_motor_paths(data)
+        change(data)
+
+    with pytest.raises(ConfigError, match=message):
+        load_rocket_config(write_modified(tmp_path, apply))
+
+
+def test_thrust_margin_above_one_is_allowed_up_to_the_cap(tmp_path: Path) -> None:
+    def apply(data: dict) -> None:
+        with_motor_paths(data)
+        data["landing_trigger"]["thrust_margin"] = 1.02
+
+    assert load_rocket_config(write_modified(tmp_path, apply)).computer.landing_trigger.thrust_margin == 1.02
+
+
+def test_randomize_section_loads_and_validates(tmp_path: Path) -> None:
+    sim = load_sim_config(EXAMPLE_SIM)
+    assert sim.randomize is not None
+    assert sim.randomize.landing_thrust_scale == (0.98, 1.02)
+    assert sim.randomize.dry_mass_offset == pytest.approx((-0.012, 0.012))
+    data = yaml.safe_load(EXAMPLE_SIM.read_text())
+    data["randomize"]["dry_mass_g"] = [12, -12]
+    bad = tmp_path / "sim.yaml"
+    bad.write_text(yaml.safe_dump(data))
+    with pytest.raises(ConfigError, match="low <= high"):
+        load_sim_config(bad)
+    data["randomize"]["dry_mass_g"] = 12
+    bad.write_text(yaml.safe_dump(data))
+    with pytest.raises(ConfigError, match="list of two numbers"):
+        load_sim_config(bad)
+    del data["randomize"]
+    bad.write_text(yaml.safe_dump(data))
+    assert load_sim_config(bad).randomize is None

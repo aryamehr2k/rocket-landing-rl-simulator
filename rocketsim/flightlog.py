@@ -28,8 +28,10 @@ ACTUATOR_COLUMNS = (
     "ascent_ignite_cmd", "ascent_thrust_n", "landing_ignite_cmd", "landing_thrust_n",
 )
 WIND_COLUMNS = ("wind_x_mps", "wind_y_mps")
+DEVICE_COLUMNS = ("brake_fraction", "device_drag_n")
 COLUMNS: tuple[str, ...] = (
     ("time_s", "phase") + SENSOR_COLUMNS + ESTIMATE_COLUMNS + TRUE_COLUMNS + ACTUATOR_COLUMNS + WIND_COLUMNS
+    + DEVICE_COLUMNS
 )
 TEXT_COLUMNS = ("phase",)
 NUMBER_FORMAT = "{:.7g}"

@@ -1,5 +1,6 @@
-# Stand-in landing motor for the example rocket. Not a real motor.
-# Replace the curve with the measured thrust curve of the motor you fly.
+# Stand-in landing motor for the free-fall version of the example rocket
+# (configs/rockets/example_tvc_freefall.yaml). Not a real motor. The rocket with the drag
+# brake uses example_g127_landing_brake.yaml instead; the README explains the difference.
 #
 # The shape matters more than the class. A solid cannot throttle, so the only way to make a
 # landing forgiving of igniter timing is a regressive curve: a hard first part that kills the

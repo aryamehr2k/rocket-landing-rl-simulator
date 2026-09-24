@@ -3,6 +3,7 @@
 import math
 
 import numpy as np
+import pytest
 
 from rocketsim.actuators import Igniter, Servo
 from rocketsim.config import RocketConfig
@@ -63,3 +64,24 @@ def test_igniter_delay_and_single_use(rocket: RocketConfig) -> None:
     assert inputs.motors[1].ignition_time == 4.0 + igniter.delay
     assert not igniter.command(4.5, inputs)
     assert inputs.motors[1].ignition_time == 4.0 + igniter.delay
+
+
+def test_brake_servo_ramps_open_and_shut() -> None:
+    from rocketsim.dragdevice import DragDeviceConfig
+    from rocketsim.actuators import BrakeServo
+
+    servo = BrakeServo(DragDeviceConfig(0.05, 0.15, deploy_time=0.5, retract_time=0.25), delay=0.02, dt=DT)
+    servo.command(2.0)  # clipped to fully open
+    assert servo.target == 1.0
+    for _ in range(4):  # 20 ms of pure delay
+        assert servo.step() == 0.0
+    steps_to_open = round(0.5 / DT)
+    fractions = [servo.step() for _ in range(steps_to_open)]
+    assert fractions[0] == pytest.approx(DT / 0.5)
+    assert fractions[-1] == pytest.approx(1.0)
+    servo.command(0.0)
+    for _ in range(4):
+        assert servo.step() == pytest.approx(1.0)
+    closing = [servo.step() for _ in range(round(0.25 / DT))]
+    assert closing[0] == pytest.approx(1.0 - DT / 0.25)
+    assert closing[-1] == pytest.approx(0.0)

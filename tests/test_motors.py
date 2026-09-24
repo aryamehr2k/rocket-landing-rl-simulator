@@ -126,3 +126,19 @@ def test_example_motor_files_load() -> None:
     assert 80.0 < ascent.total_impulse < 160.0
     assert 100.0 < landing.total_impulse < 140.0
     assert math.isclose(ascent.propellant_burned_at(ascent.burn_time), ascent.propellant_mass)
+
+
+def test_brake_landing_motor_matches_its_design() -> None:
+    from rocketsim.config import load_rocket_config
+    from tests.conftest import EXAMPLE_ROCKET
+
+    rocket = load_rocket_config(EXAMPLE_ROCKET)
+    motor = rocket.motor("landing").spec
+    assert motor.name == "EXAMPLE_G127_LANDING_BRAKE"
+    assert 126.0 < motor.total_impulse < 128.0
+    assert motor.burn_time == pytest.approx(8.2)
+    tail_start = 1.56
+    mass_at_tail = rocket.descent_mass - motor.propellant_burned_at(tail_start)
+    tail_ratio = motor.thrust_at(tail_start) / (mass_at_tail * 9.80665)
+    assert 0.90 < tail_ratio < 0.94
+    assert motor.thrust_at(0.12) / (rocket.descent_mass * 9.80665) == pytest.approx(2.2, abs=0.05)  # hard part over weight

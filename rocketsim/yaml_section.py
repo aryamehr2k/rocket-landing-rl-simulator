@@ -89,6 +89,19 @@ class Section:
             raise ConfigError(f"{self.where(key)} must be a non-empty string, got {raw!r}")
         return raw
 
+    def pair(self, key: str) -> tuple[float, float]:
+        """A `[low, high]` list of two numbers converted to SI with low <= high."""
+        raw = self._raw(key, None)
+        if (
+            not isinstance(raw, list) or len(raw) != 2
+            or any(isinstance(v, bool) or not isinstance(v, (int, float)) for v in raw)
+        ):
+            raise ConfigError(f"{self.where(key)} must be a list of two numbers [low, high], got {raw!r}")
+        low, high = (to_si(key, float(v)) for v in raw)
+        if low > high:
+            raise ConfigError(f"{self.where(key)} must have low <= high, got {raw!r}")
+        return low, high
+
     def only_keys(self, *allowed: str) -> None:
         """Reject keys that are not expected, which catches typos and wrong unit suffixes."""
         unknown = sorted(set(self.data) - set(allowed))

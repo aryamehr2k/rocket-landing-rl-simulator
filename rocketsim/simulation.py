@@ -1,7 +1,10 @@
 """The closed loop: sensors, flight computer, actuators, physics and the flight log.
 
 One `control_step` runs the flight computer once and the physics `steps_per_control` times.
-The scripted flight and the Gymnasium environment both drive it this way.
+The scripted flight and the Gymnasium environment both drive it this way. Each `reset` draws
+the flight's hidden errors (motor strength, dry mass, device drag area) from the training YAML's
+`randomize` section and rebuilds `dynamics` for them, so read `sim.dynamics` after a reset, never
+cache it across flights; the flight computer keeps the nominal rocket file.
 """
 
 from collections import deque
@@ -11,15 +14,17 @@ from pathlib import Path
 import numpy as np
 
 from rocketsim import quaternion
-from rocketsim.actuators import Igniter, Servo
+from rocketsim.actuators import BrakeServo, Igniter, Servo
 from rocketsim.aero import Wind
+from rocketsim.burnsummary import BurnSummary, BurnTracker
 from rocketsim.commands import ControlCommand, PlaneAction
 from rocketsim.config import RocketConfig
 from rocketsim.flightcomputer import FlightComputer
 from rocketsim.flightlog import FlightLogWriter
-from rocketsim.physics import IBURNED, IPOS, IQ, IVEL, IW, IZ, Flight, RocketDynamics
+from rocketsim.physics import IPOS, IQ, IVEL, IVZ, IW, IZ, Flight, RocketDynamics
+from rocketsim.randomize import EpisodeDraw, draw_episode, true_rocket
 from rocketsim.sensors import SensorSuite, Truth
-from rocketsim.simconfig import SimConfig, WindConfig, physics_steps_per_control_step
+from rocketsim.simconfig import RandomizeConfig, SimConfig, WindConfig, physics_steps_per_control_step
 
 ASCENT, LANDING = 0, 1
 STATE_NAMES = ("x_m", "y_m", "z_m", "vx_mps", "vy_mps", "vz_mps", "qw", "qx", "qy", "qz", "wx_radps", "wy_radps", "wz_radps")
@@ -47,25 +52,36 @@ class Simulation:
         self.sensors = SensorSuite(rocket.computer.sensors, self.dt, self.rng)
         self.flight_computer = FlightComputer(rocket, sim.environment, self.control_dt, sim.simulation.pad_hold_time)
         self.servos = (Servo(rocket.gimbal.pitch_servo, rocket.gimbal, self.dt), Servo(rocket.gimbal.yaw_servo, rocket.gimbal, self.dt))
+        self.brake_servo = (
+            BrakeServo(rocket.drag_device, rocket.gimbal.servo_delay, self.dt) if rocket.drag_device is not None else None
+        )
         self.igniters = tuple(Igniter(i, motor, self.rng) for i, motor in enumerate(rocket.motors))
+        self.burn = BurnTracker(rocket.computer.landing_trigger.target_speed, rocket.motor("landing").spec.burn_time)
         self.log = FlightLogWriter(log_path) if log_path is not None else None
         self.reset(seed)
 
     def reset(self, seed: int | None = None) -> None:
-        """Start a new flight. The same seed repeats the sensor errors, igniter delays and gusts exactly."""
+        """Start a new flight. The same seed repeats the sensor errors, igniter delays, gusts and hidden errors exactly."""
         if seed is not None:
             self.rng = np.random.default_rng(seed)
             self.wind.rng = self.sensors.rng = self.rng
             for igniter in self.igniters:
                 igniter.rng = self.rng
+        self.draw: EpisodeDraw = draw_episode(self.sim.randomize, self.rng)
+        self.dynamics = RocketDynamics(true_rocket(self.rocket, self.draw), self.sim.environment)
         self.flight = Flight(self.dynamics, self.dt)
+        self.flight.inputs.motors[ASCENT].thrust_scale = self.draw.ascent_thrust_scale
+        self.flight.inputs.motors[LANDING].thrust_scale = self.draw.landing_thrust_scale
         self.wind.reset()
         self.sensors.reset()
         self.flight_computer.reset()
         for servo in self.servos:
             servo.reset()
+        if self.brake_servo is not None:
+            self.brake_servo.reset()
         for igniter in self.igniters:
             igniter.reset()
+        self.burn.reset()
         self.applied = ControlCommand()
         self.pending: deque[ControlCommand] = deque([ControlCommand()] * self.rocket.control.action_delay_steps)
 
@@ -77,6 +93,14 @@ class Simulation:
     def done(self) -> bool:
         return self.flight.done or self.t >= self.sim.simulation.max_flight_time
 
+    @property
+    def burn_summary(self) -> BurnSummary:
+        return self.burn.summary
+
+    def feet_height(self) -> float:
+        """True height of the lowest point of the rocket above the ground."""
+        return self.dynamics.lowest_point(self.flight.y)
+
     def control_step(self, action: PlaneAction | None = None) -> ControlCommand:
         """Run the flight computer once, then the physics for one control period."""
         command = ControlCommand()
@@ -84,12 +108,15 @@ class Simulation:
             self._sense()
             if i == 0:
                 command = self.flight_computer.control_step(self.t, action)
+                if command.ignite_landing:
+                    self._record_ignition_command()
                 self.pending.append(command)
                 self._apply(self.pending.popleft())
             self._log_row()
             self._advance()
             if self.flight.done:
                 self.flight_computer.landed(self.t)
+                self.burn.touchdown(self.t)
                 self._sense()
                 self._log_row()
                 break
@@ -103,6 +130,12 @@ class Simulation:
     def close(self) -> None:
         if self.log is not None:
             self.log.close()
+
+    def _record_ignition_command(self) -> None:
+        computer = self.flight_computer
+        height_error = computer.height - self.feet_height()
+        speed_error = -float(computer.estimate.velocity[2]) - (-float(self.flight.y[IVZ]))
+        self.burn.commanded(self.t, height_error, speed_error)
 
     def _sense(self) -> None:
         y, t = self.flight.y, self.t
@@ -122,6 +155,8 @@ class Simulation:
         self.applied = command
         self.servos[0].command(command.gimbal_pitch)
         self.servos[1].command(command.gimbal_yaw)
+        if self.brake_servo is not None:
+            self.brake_servo.command(command.brake_fraction)
         if command.ignite_ascent:
             self.igniters[ASCENT].command(self.t, self.flight.inputs)
         if command.ignite_landing:
@@ -132,7 +167,10 @@ class Simulation:
         inputs.wind = self.wind.step(self.dt)
         inputs.gimbal_pitch = self.servos[0].step()
         inputs.gimbal_yaw = self.servos[1].step()
+        if self.brake_servo is not None:
+            inputs.brake_fraction = self.brake_servo.step()
         self.flight.step()
+        self.burn.update(self.t, self.feet_height(), -float(self.flight.y[IVZ]), inputs.motors[LANDING].ignition_time)
 
     def _log_row(self) -> None:
         if self.log is None:
@@ -166,6 +204,8 @@ class Simulation:
                 "landing_thrust_n": self.dynamics.motor_thrust(LANDING, t, y, inputs),
                 "wind_x_mps": inputs.wind[0],
                 "wind_y_mps": inputs.wind[1],
+                "brake_fraction": inputs.brake_fraction,
+                "device_drag_n": self.dynamics.device_drag(y, inputs),
             }
         )
         self.log.write(row)
@@ -181,3 +221,18 @@ def with_wind(sim: SimConfig, steady: float | None, direction: float | None, gus
     if gust_std is not None:
         wind = replace(wind, gust_std=gust_std)
     return wind
+
+
+def with_fixed_errors(
+    sim: SimConfig, landing_thrust_scale: float | None, dry_mass_offset: float | None,
+    device_drag_area_scale: float | None = None,
+) -> SimConfig:
+    """The training YAML with a hidden error pinned to one value, for sweeps; None keeps the YAML's range."""
+    randomize = sim.randomize if sim.randomize is not None else RandomizeConfig()
+    if landing_thrust_scale is not None:
+        randomize = replace(randomize, landing_thrust_scale=(landing_thrust_scale, landing_thrust_scale))
+    if dry_mass_offset is not None:
+        randomize = replace(randomize, dry_mass_offset=(dry_mass_offset, dry_mass_offset))
+    if device_drag_area_scale is not None:
+        randomize = replace(randomize, device_drag_area_scale=(device_drag_area_scale, device_drag_area_scale))
+    return replace(sim, randomize=randomize)

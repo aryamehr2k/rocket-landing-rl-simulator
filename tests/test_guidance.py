@@ -133,3 +133,133 @@ def test_abort_zeroes_everything(safety: Safety) -> None:
     wanted = ControlCommand(gimbal_pitch=0.1, gimbal_yaw=0.1, ignite_landing=True)
     command, _ = safety.filter(wanted, Phase.ABORT, 10.0, 1.0, estimate(), 30.0)
     assert command == ControlCommand()
+
+
+from dataclasses import replace
+
+from rocketsim.config import load_rocket_config
+from rocketsim.dragdevice import DragDeviceConfig
+from rocketsim.flightcomputer import FlightComputer
+from rocketsim.simconfig import load_sim_config
+from tests.conftest import EXAMPLE_ROCKET, EXAMPLE_SIM
+
+
+def example_computer() -> FlightComputer:
+    rocket = load_rocket_config(EXAMPLE_ROCKET)
+    return FlightComputer(rocket, load_sim_config(EXAMPLE_SIM).environment, DT, 2.0)
+
+
+def test_brake_rules_open_hold_and_shut_in_order() -> None:
+    computer = example_computer()
+    assert computer.brake_rule(Phase.COAST, 12.0) == 0.0
+    assert computer.brake_rule(Phase.DESCENT, 5.0) == 0.0  # not yet falling fast enough
+    assert computer.brake_rule(Phase.DESCENT, 9.0) == 1.0
+    assert computer.brake_rule(Phase.DESCENT, 7.0) == 1.0  # stays open once opened
+    assert computer.brake_rule(Phase.LANDING_BURN, 15.0) == 1.0  # burn_fraction of the example
+    assert computer.brake_rule(Phase.LANDING_BURN, 2.0) == 0.0  # hand-over: shut
+    assert computer.brake_rule(Phase.LANDING_BURN, 6.0) == 0.0  # and stays shut
+    fresh = example_computer()
+    assert fresh.brake_rule(Phase.LANDING_BURN, 10.0) == 0.0  # never deployed, never opened in the burn
+
+
+def test_safety_brake_refusals() -> None:
+    rocket = load_rocket_config(EXAMPLE_ROCKET)
+    nose = Safety(rocket.computer.safety, rocket.gimbal, rocket.drag_device, rocket.descent_cg)
+    wanted = ControlCommand(brake_fraction=1.0)
+    for phase, allowed in ((Phase.COAST, False), (Phase.DESCENT, True), (Phase.LANDING_BURN, True), (Phase.BOOST, False)):
+        command, refused = nose.filter(wanted, phase, 10.0, 1.0, estimate(), 30.0)
+        assert (command.brake_fraction == 1.0) is allowed, phase
+        assert (refused == ()) is allowed
+    tail_device = DragDeviceConfig(0.05, 0.96, 0.5, 0.3)
+    tail = Safety(rocket.computer.safety, rocket.gimbal, tail_device, rocket.descent_cg)
+    command, refused = tail.filter(wanted, Phase.DESCENT, 10.0, 1.0, estimate(), 30.0)
+    assert command.brake_fraction == 0.0 and "behind the centre of gravity" in refused[0]
+    command, _ = tail.filter(wanted, Phase.LANDING_BURN, 10.0, 1.0, estimate(), 30.0)
+    assert command.brake_fraction == 1.0
+    command, _ = nose.filter(ControlCommand(brake_fraction=3.0), Phase.DESCENT, 10.0, 1.0, estimate(), 30.0)
+    assert command.brake_fraction == 1.0  # clipped
+
+
+def test_example_trigger_table_with_the_brake() -> None:
+    trigger = example_computer().trigger
+    assert trigger.can_reach_target_from == pytest.approx(21.5)
+    assert trigger.expected_arrival_speed == pytest.approx(20.0, abs=0.1)
+    assert 12.5 < trigger.stopping_distance(20.0) < 13.5
+    assert trigger.drag_factor_at(1.0) > 20.0 * trigger.drag_factor_at(0.0)
+    assert trigger.drag_factor == trigger.drag_factor_at(1.0)  # burn_fraction 1 in the example
+
+
+def test_delay_prediction_counts_the_drag() -> None:
+    trigger = example_computer().trigger
+    trigger.ignition_delay = 0.18
+    speed, height = 20.0, 30.0
+    accel = trigger.gravity - trigger.drag_factor_at(1.0) * speed ** 2 / trigger.mass_at_ignition
+    assert abs(accel) < 0.2  # at terminal speed the descent barely accelerates
+    later_speed = speed + accel * 0.18
+    fallen = 0.5 * (speed + later_speed) * 0.18
+    required = float(trigger.required_height(later_speed))
+    assert trigger.should_ignite(required + fallen - 0.01, speed, brake_fraction=1.0)
+    assert not trigger.should_ignite(required + fallen + 0.01, speed, brake_fraction=1.0)
+    # With the brake shut the prediction adds gravity's full 1.8 m/s and fires higher up.
+    assert trigger.should_ignite(required + fallen + 0.01, speed, brake_fraction=0.0)
+    decisions = trigger.should_ignite(np.array([height, 5.0]), np.array([speed, speed]), 1.0)
+    assert list(decisions) == [False, True]
+
+
+def test_drag_fit_from_the_accelerometer_rebuilds_the_table() -> None:
+    rocket = load_rocket_config(EXAMPLE_ROCKET)
+    config = replace(rocket.computer.landing_trigger, calibrate_drag_in_flight=True)
+    trigger = LandingTrigger(rocket, config, load_sim_config(EXAMPLE_SIM).environment)
+    before, reachable_before = trigger.heights.copy(), trigger.reachable.copy()
+    true_total = 1.1 * trigger.drag_factor_at(1.0)  # the real brake has 10 % more drag than the file says
+    t, speed = 0.0, 14.0
+    while not trigger.observe_descent(t, speed, true_total * speed ** 2 / trigger.mass_at_ignition, 0.0):
+        t += DT
+        speed += 0.05  # still speeding up: the fit does not need terminal speed
+        assert t < 2.0
+    assert trigger.calibrated
+    assert trigger.drag_factor_device == pytest.approx(true_total - trigger.drag_factor_body, rel=1e-6)
+    near = (np.abs(trigger.speeds - trigger.expected_arrival_speed) <= 4.9) & reachable_before
+    far = (np.abs(trigger.speeds - trigger.expected_arrival_speed) >= 5.1) & reachable_before
+    assert near.sum() > 10 and np.all(trigger.heights[near] < before[near])  # more drag: shorter stopping distances
+    assert np.array_equal(trigger.heights[far], before[far])
+    assert not trigger.observe_descent(t + DT, speed, 9.0, 0.0)  # done once
+    trigger.reset()
+    assert not trigger.calibrated and np.array_equal(trigger.heights, before)
+
+
+def test_required_height_stays_at_the_edge_beyond_the_table_reach() -> None:
+    rocket = load_rocket_config(EXAMPLE_ROCKET)
+    trigger = LandingTrigger(rocket, rocket.computer.landing_trigger, load_sim_config(EXAMPLE_SIM).environment)
+    edge = trigger.can_reach_target_from
+    assert 21.0 <= edge <= 22.0
+    at_edge = float(trigger.required_height(edge))
+    assert float(trigger.required_height(edge + 0.5)) == at_edge
+    assert float(trigger.required_height(40.0)) == at_edge
+    assert float(trigger.required_height(edge - 0.5)) < at_edge
+    # Without the cap the whole burn's fall distance would apply: tens of metres, not the edge value.
+    whole_burn = float(trigger.burn(edge + 0.5).distance) + trigger.config.target_height
+    assert whole_burn > at_edge + 10.0
+
+
+def test_drag_fit_skips_slow_and_tilted_samples_and_corrects_for_tilt() -> None:
+    rocket = load_rocket_config(EXAMPLE_ROCKET)
+    config = replace(rocket.computer.landing_trigger, calibrate_drag_in_flight=True)
+    env = load_sim_config(EXAMPLE_SIM).environment
+    trigger = LandingTrigger(rocket, config, env)
+    total = trigger.drag_factor_at(1.0)
+    assert not trigger.observe_descent(0.0, 5.0, 1.0, 0.0) and trigger._fit_start is None  # too slow
+    assert not trigger.observe_descent(0.1, 20.0, 9.0, math.radians(30.0)) and trigger._fit_start is None
+    tilt, t = math.radians(15.0), 0.2
+    while not trigger.observe_descent(t, 20.0, total * 400.0 * math.cos(tilt) / trigger.mass_at_ignition, tilt):
+        t += DT
+    assert trigger.drag_factor_device == pytest.approx(trigger._nominal[0], rel=1e-6)
+    plain = LandingTrigger(rocket, rocket.computer.landing_trigger, env)
+    assert not plain.observe_descent(0.0, 21.0, 9.8, 0.0) and not plain.observe_descent(1.0, 21.0, 9.8, 0.0)
+
+
+def test_warning_when_the_terminal_speed_is_near_the_table_reach() -> None:
+    rocket = load_rocket_config(EXAMPLE_ROCKET)
+    small = replace(rocket, drag_device=replace(rocket.drag_device, drag_area=0.048))  # terminal speed about 21.6 m/s
+    with pytest.warns(UserWarning, match="within"):
+        LandingTrigger(small, small.computer.landing_trigger, load_sim_config(EXAMPLE_SIM).environment)

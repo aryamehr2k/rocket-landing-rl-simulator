@@ -16,3 +16,9 @@ wind:
   steady_direction_deg: 30.0  # direction the wind blows toward, from +x toward +y
   gust_std_mps: 1.5
   gust_time_constant_s: 2.0
+
+randomize:                    # hidden per-flight errors, drawn uniformly; the flight computer does not see them
+  landing_thrust_scale: [0.98, 1.02]   # a batch of landing motors within 2 % of the curve in the motor file
+  ascent_thrust_scale: [0.95, 1.05]
+  dry_mass_g: [-12, 12]                # weighing error and small changes between flights
+  device_drag_area_scale: [0.95, 1.05] # how well the petals' drag area is known

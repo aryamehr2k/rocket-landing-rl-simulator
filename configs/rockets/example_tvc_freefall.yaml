@@ -1,9 +1,9 @@
-# Example thrust vector controlled rocket, about 1.4 kg on the pad.
-# Every number here is a stand-in. Replace them with values measured from your rocket,
-# OpenRocket, a scale and the real motor files before trusting any result.
-# Positions are stations from the nose tip toward the tail. See docs/conventions.md.
+# The example rocket as it was before the drag brake: a free fall from apogee to about 36 m/s
+# and a 46 N hard burn lit 38 m up. Kept for comparison with example_tvc.yaml; the README
+# section "The landing burn" explains why this design lands only about 6 flights in 10.
+# Every number here is a stand-in. Positions are stations from the nose tip toward the tail.
 
-name: example_tvc
+name: example_tvc_freefall
 
 airframe:
   dry_mass_g: 1200.0             # everything except the motors
@@ -25,7 +25,7 @@ motors:
     gimbaled: true
     ignition_delay_s: {mean: 0.10, spread: 0.05}
   landing:
-    file: ../motors/example_g127_landing_brake.yaml
+    file: ../motors/example_g120_landing.yaml
     position_from_nose_mm: 690.0
     gimbaled: true
     ignition_delay_s: {mean: 0.15, spread: 0.03}
@@ -53,12 +53,6 @@ gimbal:
       pulse_resolution_us: 1
       min_us: 1000
       max_us: 2000
-
-drag_device:                      # four flat petals at the nose that open during the descent, see README
-  drag_area_cm2: 566.0            # Cd times area of the open petals (about 470 cm2 of plate at Cd 1.2)
-  station_from_nose_mm: 150.0     # ahead of the descent centre of gravity (494 mm), so it steadies the fall
-  deploy_time_s: 0.5              # shut to fully open
-  retract_time_s: 0.3             # fully open to shut
 
 legs:
   span_mm: 300.0                  # diameter of the circle through the feet
@@ -92,13 +86,7 @@ phases:
 landing_trigger:
   target_speed_mps: 0.5           # what the hard part of the burn should bring the descent speed down to
   target_height_m: 1.5            # feet height where that happens; the tail of the burn does the rest
-  thrust_margin: 1.0              # the table counts on the curve times this; set it to the strongest motor of your batch (1.02)
-  calibrate_drag_in_flight: false  # true: fit the brake drag from the accelerometer in flight and rebuild the table
-
-brake:                            # flight computer rules for the drag device
-  deploy_descent_speed_mps: 8.0   # open once falling faster than this after apogee, not at apogee itself
-  retract_descent_speed_mps: 3.0  # shut once the burn has slowed the descent below this, before the tail
-  burn_fraction: 1.0              # opening held during the hard part of the burn; the stopping table assumes it
+  thrust_margin: 1.0              # share of the thrust curve the table counts on; below 1 it lights early and the rocket climbs
 
 pid:
   attitude:                       # tilt error to gimbal angle, per plane

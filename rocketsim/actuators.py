@@ -9,6 +9,7 @@ from collections import deque
 import numpy as np
 
 from rocketsim.config import GimbalConfig, MotorConfig, ServoCalibration
+from rocketsim.dragdevice import FULLY_OPEN, SHUT, DragDeviceConfig
 from rocketsim.physics import Inputs
 
 
@@ -47,6 +48,40 @@ class Servo:
         target = self.calibration.gimbal_for_pulse(target_pulse)
         self.angle += min(max(target - self.angle, -self.rate_step), self.rate_step)
         return self.angle
+
+
+class BrakeServo:
+    """Drives the drag device opening: a pure delay, then a rate limit set by the deploy and retract times."""
+
+    def __init__(self, device: DragDeviceConfig, delay: float, dt: float) -> None:
+        self.device = device
+        self.delay_steps = int(round(delay / dt))
+        self.open_step = FULLY_OPEN / device.deploy_time * dt
+        self.close_step = FULLY_OPEN / device.retract_time * dt
+        self.reset()
+
+    def reset(self) -> None:
+        self.target = SHUT
+        self.pending: deque[float] = deque([SHUT] * self.delay_steps)
+        self.fraction = SHUT
+
+    def command(self, fraction: float) -> float:
+        """Accept a new opening fraction, clipped to [0, 1]."""
+        self.target = min(max(fraction, SHUT), FULLY_OPEN)
+        return self.target
+
+    def step(self) -> float:
+        """One physics step: the command from `delay` ago becomes the target, the petals move toward it."""
+        if self.delay_steps:
+            self.pending.append(self.target)
+            target = self.pending.popleft()
+        else:
+            target = self.target
+        if target > self.fraction:
+            self.fraction = min(target, self.fraction + self.open_step)
+        else:
+            self.fraction = max(target, self.fraction - self.close_step)
+        return self.fraction
 
 
 class Igniter:

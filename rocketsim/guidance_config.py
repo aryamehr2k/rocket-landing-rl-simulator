@@ -7,12 +7,14 @@ firmware needs. rocketsim.config calls load_flight_computer_config while loading
 from dataclasses import dataclass
 from pathlib import Path
 
+from rocketsim.dragdevice import FULLY_OPEN
 from rocketsim.sensors import SensorsConfig, load_sensors_config
 from rocketsim.yaml_section import ConfigError, Section
 
-SECTION_KEYS = ("sensors", "estimator", "phases", "landing_trigger", "pid", "safety")
+SECTION_KEYS = ("sensors", "estimator", "phases", "landing_trigger", "pid", "safety", "brake")
 MAX_TILT_DEG = 90.0
 MAX_GAIN_FRACTION = 1.0
+MAX_THRUST_MARGIN = 1.10  # the table may assume a motor up to this much stronger than the curve
 
 
 @dataclass(frozen=True)
@@ -36,6 +38,16 @@ class LandingTriggerConfig:
     target_speed: float
     target_height: float
     thrust_margin: float
+    calibrate_drag_in_flight: bool = False
+
+
+@dataclass(frozen=True)
+class BrakeConfig:
+    """Flight computer rules for the drag device: when to open it, when to shut it, how far to hold it in the burn."""
+
+    deploy_descent_speed: float
+    retract_descent_speed: float
+    burn_fraction: float
 
 
 @dataclass(frozen=True)
@@ -69,6 +81,7 @@ class FlightComputerConfig:
     landing_trigger: LandingTriggerConfig
     pid: PidConfig
     safety: SafetyConfig
+    brake: BrakeConfig | None = None
 
 
 def load_flight_computer_config(root: Section, base_dir: Path) -> FlightComputerConfig:
@@ -86,6 +99,7 @@ def load_flight_computer_config(root: Section, base_dir: Path) -> FlightComputer
         landing_trigger=_landing_trigger(root.sub("landing_trigger")),
         pid=_pid(root.sub("pid")),
         safety=_safety(root.sub("safety")),
+        brake=_brake(root.sub("brake")) if root.has("brake") else None,
     )
 
 
@@ -113,12 +127,25 @@ def _phases(section: Section) -> PhaseConfig:
 
 
 def _landing_trigger(section: Section) -> LandingTriggerConfig:
-    section.only_keys("target_speed_mps", "target_height_m", "thrust_margin")
+    section.only_keys("target_speed_mps", "target_height_m", "thrust_margin", "calibrate_drag_in_flight")
     return LandingTriggerConfig(
         target_speed=section.number("target_speed_mps", minimum=0.0),
         target_height=section.number("target_height_m", minimum=0.0),
-        thrust_margin=section.number("thrust_margin", above=0.0, maximum=MAX_GAIN_FRACTION),
+        thrust_margin=section.number("thrust_margin", above=0.0, maximum=MAX_THRUST_MARGIN),
+        calibrate_drag_in_flight=section.boolean("calibrate_drag_in_flight", default=False),
     )
+
+
+def _brake(section: Section) -> BrakeConfig:
+    section.only_keys("deploy_descent_speed_mps", "retract_descent_speed_mps", "burn_fraction")
+    config = BrakeConfig(
+        deploy_descent_speed=section.number("deploy_descent_speed_mps", minimum=0.0),
+        retract_descent_speed=section.number("retract_descent_speed_mps", minimum=0.0),
+        burn_fraction=section.number("burn_fraction", minimum=0.0, maximum=FULLY_OPEN),
+    )
+    if config.retract_descent_speed >= config.deploy_descent_speed:
+        raise ConfigError(f"{section.where('retract_descent_speed_mps')} must be below deploy_descent_speed_mps")
+    return config
 
 
 def _pid(section: Section) -> PidConfig:

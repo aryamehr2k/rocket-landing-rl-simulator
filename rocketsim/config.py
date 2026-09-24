@@ -8,14 +8,15 @@ import math
 from dataclasses import dataclass
 from pathlib import Path
 
+from rocketsim.dragdevice import DragDeviceConfig, load_drag_device
 from rocketsim.guidance_config import SECTION_KEYS, FlightComputerConfig, load_flight_computer_config
 from rocketsim.motors import MotorFileError, MotorSpec, load_motor
-from rocketsim.units import MM_PER_M, rad_to_deg
+from rocketsim.servo_calibration import ServoCalibration, load_servo_calibration
+from rocketsim.units import MM_PER_M
 from rocketsim.yaml_section import ConfigError, Section, read_yaml_mapping
 
 MOTOR_ROLES = ("ascent", "landing")
 SERVO_NAMES = ("pitch", "yaw")
-SERVO_SIGNS = (-1, 1)
 MAX_GIMBAL_ANGLE_DEG = 90.0
 MAX_TOUCHDOWN_TILT_DEG = 90.0
 MIN_LEG_COUNT = 3
@@ -47,34 +48,6 @@ class MotorConfig:
     gimbaled: bool
     ignition_delay_mean: float
     ignition_delay_spread: float
-
-
-@dataclass(frozen=True)
-class ServoCalibration:
-    """Gimbal angle to servo pulse width. Angles in radians, pulses in microseconds."""
-
-    center_us: float
-    pulse_us_per_rad: float
-    sign: int
-    linkage_ratio: float
-    pulse_resolution_us: float
-    min_us: float
-    max_us: float
-
-    def pulse_for_gimbal(self, gimbal_angle: float) -> float:
-        """Unquantised pulse width for a gimbal angle."""
-        servo_angle = gimbal_angle / self.linkage_ratio
-        return self.center_us + self.sign * servo_angle * self.pulse_us_per_rad
-
-    def quantize(self, pulse_us: float) -> float:
-        """Round half up to the pulse resolution, then clip. The C firmware does the same."""
-        steps = math.floor(pulse_us / self.pulse_resolution_us + HALF)
-        return min(max(steps * self.pulse_resolution_us, self.min_us), self.max_us)
-
-    def gimbal_for_pulse(self, pulse_us: float) -> float:
-        """Gimbal angle the servo actually holds for a pulse width."""
-        servo_angle = self.sign * (pulse_us - self.center_us) / self.pulse_us_per_rad
-        return servo_angle * self.linkage_ratio
 
 
 @dataclass(frozen=True)
@@ -115,6 +88,7 @@ class RocketConfig:
     control: ControlConfig
     computer: FlightComputerConfig
     source: str
+    drag_device: DragDeviceConfig | None = None
 
     def motor(self, role: str) -> MotorConfig:
         for motor in self.motors:
@@ -144,12 +118,25 @@ class RocketConfig:
         """Height of the centre of gravity above the ground when standing on the pad."""
         return self.feet_station - self.loaded_cg
 
+    @property
+    def descent_mass(self) -> float:
+        """Mass during the descent: dry, the empty ascent case and the full landing motor."""
+        return self.airframe.dry_mass + self.motor("ascent").spec.case_mass + self.motor("landing").spec.total_mass
+
+    @property
+    def descent_cg(self) -> float:
+        """Centre of gravity station during the descent, where a drag device's stability is judged."""
+        dry, ascent, landing = self.airframe, self.motor("ascent"), self.motor("landing")
+        moment = dry.dry_mass * dry.dry_cg + ascent.spec.case_mass * ascent.position
+        moment += landing.spec.total_mass * landing.position
+        return moment / self.descent_mass
+
 
 def load_rocket_config(path: str | Path) -> RocketConfig:
     """Load and validate a rocket YAML. Motor file paths are relative to the rocket file."""
     data, source = read_yaml_mapping(path)
     root = Section(data, source)
-    root.only_keys("name", "airframe", "aero", "motors", "gimbal", "legs", "control", *SECTION_KEYS)
+    root.only_keys("name", "airframe", "aero", "motors", "gimbal", "legs", "control", "drag_device", *SECTION_KEYS)
     airframe = _airframe(root.sub("airframe"))
     length_mm = airframe.length * MM_PER_M
     aero_section = root.sub("aero")
@@ -172,10 +159,13 @@ def load_rocket_config(path: str | Path) -> RocketConfig:
         control_rate_hz=control_section.number("control_rate_hz", above=0.0),
         action_delay_steps=control_section.integer("action_delay_steps", minimum=0),
     )
+    device = load_drag_device(root.sub("drag_device"), length_mm) if root.has("drag_device") else None
     computer = load_flight_computer_config(root, Path(source).parent)
+    if computer.brake is not None and device is None:
+        raise ConfigError(f"{root.where('brake')} needs a drag_device section to act on")
     return RocketConfig(
         name=root.string("name"), airframe=airframe, aero=aero, motors=motors, gimbal=gimbal, legs=legs,
-        control=control, computer=computer, source=source,
+        control=control, computer=computer, source=source, drag_device=device,
     )
 
 
@@ -223,37 +213,6 @@ def _motor(section: Section, role: str, base_dir: Path, length_mm: float) -> Mot
     )
 
 
-def _servo(cal: Section, max_angle: float) -> ServoCalibration:
-    cal.only_keys(
-        "center_us", "pulse_us_per_deg", "sign", "linkage_ratio", "pulse_resolution_us", "min_us", "max_us"
-    )
-    sign = cal.integer("sign")
-    if sign not in SERVO_SIGNS:
-        raise ConfigError(f"{cal.where('sign')} must be 1 or -1, got {sign}")
-    calibration = ServoCalibration(
-        center_us=cal.number("center_us", above=0.0),
-        pulse_us_per_rad=cal.number("pulse_us_per_deg", above=0.0),
-        sign=sign,
-        linkage_ratio=cal.number("linkage_ratio", above=0.0),
-        pulse_resolution_us=cal.number("pulse_resolution_us", above=0.0),
-        min_us=cal.number("min_us", above=0.0),
-        max_us=cal.number("max_us", above=0.0),
-    )
-    if not calibration.min_us < calibration.center_us < calibration.max_us:
-        raise ConfigError(f"{cal.where('center_us')} must lie between min_us and max_us")
-    for key in ("center_us", "min_us", "max_us"):
-        if getattr(calibration, key) % calibration.pulse_resolution_us != 0.0:
-            raise ConfigError(f"{cal.where(key)} must be a multiple of pulse_resolution_us")
-    for angle in (-max_angle, max_angle):
-        pulse = calibration.pulse_for_gimbal(angle)
-        if not calibration.min_us <= pulse <= calibration.max_us:
-            raise ConfigError(
-                f"{cal.where('min_us')}: gimbal angle {rad_to_deg(angle):.1f} deg needs a pulse of "
-                f"{pulse:.0f} us, outside min_us..max_us"
-            )
-    return calibration
-
-
 def _gimbal(section: Section, length_mm: float) -> GimbalConfig:
     section.only_keys(
         "pivot_from_nose_mm", "max_angle_deg", "servo_rate_limit_deg_per_s", "servo_delay_s",
@@ -268,8 +227,8 @@ def _gimbal(section: Section, length_mm: float) -> GimbalConfig:
         servo_rate_limit=section.number("servo_rate_limit_deg_per_s", above=0.0),
         servo_delay=section.number("servo_delay_s", minimum=0.0),
         servo_deadband=section.number("servo_deadband_deg", minimum=0.0),
-        pitch_servo=_servo(servos.sub("pitch"), max_angle),
-        yaw_servo=_servo(servos.sub("yaw"), max_angle),
+        pitch_servo=load_servo_calibration(servos.sub("pitch"), max_angle),
+        yaw_servo=load_servo_calibration(servos.sub("yaw"), max_angle),
     )
     if gimbal.servo_deadband >= max_angle:
         raise ConfigError(f"{section.where('servo_deadband_deg')} must be smaller than max_angle_deg")

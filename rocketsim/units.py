@@ -10,6 +10,8 @@ from typing import Callable
 MM_PER_M = 1000.0
 G_PER_KG = 1000.0
 US_PER_S = 1.0e6
+MS_PER_S = 1000.0
+CM2_PER_M2 = 1.0e4
 DEG_PER_RAD = 180.0 / math.pi
 
 
@@ -19,6 +21,10 @@ def mm_to_m(value: float) -> float:
 
 def g_to_kg(value: float) -> float:
     return value / G_PER_KG
+
+
+def kg_to_g(value: float) -> float:
+    return value * G_PER_KG
 
 
 def deg_to_rad(value: float) -> float:
@@ -31,6 +37,10 @@ def rad_to_deg(value: float) -> float:
 
 def us_to_s(value: float) -> float:
     return value / US_PER_S
+
+
+def cm2_to_m2(value: float) -> float:
+    return value / CM2_PER_M2
 
 
 def us_per_deg_to_us_per_rad(value: float) -> float:
@@ -50,6 +60,7 @@ SUFFIX_CONVERSIONS: list[tuple[str, Converter]] = [
     ("_deg_per_m", deg_to_rad),
     ("_deg_per_s", deg_to_rad),
     ("_kgm2", identity),
+    ("_cm2", cm2_to_m2),
     ("_mps2", identity),
     ("_mps", identity),
     ("_deg", deg_to_rad),

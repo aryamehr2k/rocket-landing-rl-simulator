@@ -1,0 +1,34 @@
+# Stand-in landing motor for the example rocket with its drag brake. Not a real motor.
+# Replace the curve with the measured thrust curve of the motor you fly.
+#
+# The rocket arrives at the burn at its terminal speed of about 20 m/s (drag from the open
+# petals equals the weight there), whatever the apogee. The hard part is sized for exactly that
+# arrival: 31 N is 2.2 times the 14.0 N weight at ignition, and together with the 14 N of brake
+# drag it slows the rocket at about 22 m/s^2 at first, 12 m/s^2 once the drag has faded. It ends
+# at 1.41 s, when a 20 m/s descent has just come down to walking pace about 1.6 m up (the one
+# dimensional model of scripts/design_landing_burn.py; real flights scatter 0.3-2.5 m). Half a
+# second too long and the rocket stops in the air and climbs; too short and it hits with speed.
+# Then a tail at 12.6 N, 0.92 of the weight at tail start and 0.95 at burnout, sinks the last
+# metres over 2-3 s. The tail lasts 6.5 s because a stop that came out 1 m too high takes 3 s
+# to sink, and the tail must outlast it: with a 3.7 s tail that case ran out of propellant in
+# the air. About 127 N s in total: 45 N s to the end of the hard ramp at 1.56 s, 82 N s in the tail.
+name: EXAMPLE_G127_LANDING_BRAKE
+propellant_mass_g: 93
+total_mass_g: 169
+diameter_mm: 29
+length_mm: 250
+throttleable: false
+throttle_lag_s: 0.0
+# Default ignition delay for this motor and igniter. The rocket file may override it.
+ignition_delay_s:
+  mean: 0.15
+  spread: 0.03
+# [time_s, thrust_n] pairs, times strictly increasing, last thrust zero.
+thrust_curve:
+  - [0.00, 0.0]
+  - [0.05, 30.0]
+  - [0.12, 31.0]
+  - [1.41, 29.0]
+  - [1.56, 12.6]     # tail: 0.92 of the weight at tail start, so the rocket sinks slowly
+  - [8.00, 12.5]
+  - [8.20, 0.0]

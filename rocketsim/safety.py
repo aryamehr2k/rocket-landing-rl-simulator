@@ -4,15 +4,28 @@ from dataclasses import replace
 
 from rocketsim.commands import ControlCommand
 from rocketsim.config import GimbalConfig
+from rocketsim.dragdevice import FULLY_OPEN, SHUT, DragDeviceConfig
 from rocketsim.estimator import Estimate
 from rocketsim.guidance_config import SafetyConfig
 from rocketsim.phases import LANDING_IGNITION_PHASES, Phase
 
+BRAKE_PHASES = (Phase.DESCENT, Phase.LANDING_BURN)
+TAIL_DEVICE_PHASES = (Phase.LANDING_BURN,)
+
 
 class Safety:
-    def __init__(self, config: SafetyConfig, gimbal: GimbalConfig) -> None:
+    def __init__(
+        self,
+        config: SafetyConfig,
+        gimbal: GimbalConfig,
+        device: DragDeviceConfig | None = None,
+        descent_cg: float = 0.0,
+    ) -> None:
         self.config = config
         self.gimbal = gimbal
+        # A device behind the descent centre of gravity tips a falling rocket over, so it may
+        # only open once the gimbal has thrust to hold the attitude.
+        self.device_behind_cg = device is not None and device.station > descent_cg
 
     def filter(
         self,
@@ -37,9 +50,19 @@ class Safety:
             if reason:
                 landing = False
                 refused.append(reason)
+        brake = min(max(command.brake_fraction, SHUT), FULLY_OPEN)
+        if brake > SHUT:
+            reason = self._brake_refusal(phase)
+            if reason:
+                brake = SHUT
+                refused.append(reason)
         if phase == Phase.ABORT:
-            pitch, yaw, ascent, landing = 0.0, 0.0, False, False
-        return replace(command, gimbal_pitch=pitch, gimbal_yaw=yaw, ignite_ascent=ascent, ignite_landing=landing), tuple(refused)
+            pitch, yaw, ascent, landing, brake = 0.0, 0.0, False, False, SHUT
+        filtered = replace(
+            command, gimbal_pitch=pitch, gimbal_yaw=yaw, ignite_ascent=ascent, ignite_landing=landing,
+            brake_fraction=brake,
+        )
+        return filtered, tuple(refused)
 
     def _landing_refusal(
         self, phase: Phase, t: float, liftoff_time: float | None, estimate: Estimate, height: float
@@ -53,4 +76,11 @@ class Safety:
             return "landing ignition refused: tilt too large"
         if height > config.max_landing_ignition_height:
             return "landing ignition refused: too high"
+        return None
+
+    def _brake_refusal(self, phase: Phase) -> str | None:
+        if phase not in BRAKE_PHASES:
+            return f"brake refused in {phase.value}"
+        if self.device_behind_cg and phase not in TAIL_DEVICE_PHASES:
+            return f"brake refused in {phase.value}: a device behind the centre of gravity tips the fall"
         return None
