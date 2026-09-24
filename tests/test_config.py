@@ -67,8 +67,10 @@ def write_modified(tmp_path: Path, change: Change) -> Path:
 
 
 def with_motor_paths(data: dict) -> None:
+    """Make the motor and sensor file paths absolute so the copy can live anywhere."""
     for role in ("ascent", "landing"):
         data["motors"][role]["file"] = str(EXAMPLE_ROCKET.parent / data["motors"][role]["file"])
+    data["sensors"]["file"] = str(EXAMPLE_ROCKET.parent / data["sensors"]["file"])
 
 
 @pytest.mark.parametrize(
@@ -109,7 +111,7 @@ def test_motor_yaml_default_ignition_delay_is_used(tmp_path: Path) -> None:
 
     rocket = load_rocket_config(write_modified(tmp_path, apply))
     assert rocket.motor("landing").ignition_delay_mean == pytest.approx(0.15)
-    assert rocket.motor("landing").ignition_delay_spread == pytest.approx(0.08)
+    assert rocket.motor("landing").ignition_delay_spread == pytest.approx(0.03)
 
 
 def test_missing_file_and_bad_top_level(tmp_path: Path) -> None:

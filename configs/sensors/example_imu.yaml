@@ -1,0 +1,25 @@
+# Stand-in sensor package: a hobby grade six axis IMU and a barometer.
+# Replace the numbers with the datasheet values (noise density times the square root of the
+# bandwidth) or, better, with what you measure with the board sitting still on a table.
+# A bias is drawn once per flight from its standard deviation; the estimator calibrates it
+# away on the pad, so what matters for the landing is how much it drifts during the flight.
+
+name: example_imu
+
+imu:
+  rate_hz: 200
+  lag_s: 0.002                    # from the true motion to the value in the register
+  accelerometer:
+    noise_std_mps2: 0.05
+    bias_std_mps2: 0.02
+    range_mps2: 156.0             # 16 g full scale
+  gyroscope:
+    noise_std_deg_per_s: 0.1
+    bias_std_deg_per_s: 0.5
+    range_deg_per_s: 2000.0
+
+barometer:
+  rate_hz: 50
+  lag_s: 0.020
+  noise_std_m: 0.30
+  bias_std_m: 1.0

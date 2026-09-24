@@ -18,6 +18,8 @@ value is in and `rocketsim/units.py` converts it when the file is loaded:
 | `_deg`         | degrees                       | radians                 |
 | `_deg_per_s`   | degrees per second            | radians per second      |
 | `_us_per_deg`  | microseconds per degree       | microseconds per radian |
+| `_deg_per_m`   | degrees per metre             | radians per metre       |
+| `_deg_per_mps` | degrees per metre per second  | radians per metre per second |
 | `_s`           | seconds                       | seconds                 |
 | `_mps`, `_mps2`| metres per second (squared)   | unchanged               |
 | `_us`          | microseconds                  | microseconds            |
@@ -26,7 +28,8 @@ value is in and `rocketsim/units.py` converts it when the file is loaded:
 Rules:
 
 - The longest matching suffix wins, so `_deg_per_s` is a rate and `_us_per_deg` is a servo
-  calibration, never a plain `_s` or `_deg`.
+  calibration, never a plain `_s` or `_deg`. Plain gains carry no suffix (`kp`) or a suffix
+  that says what they multiply (`kd_s`, `ki_per_s`, `baro_velocity_gain_per_s`).
 - A key whose suffix is not in the table (for example `drag_coefficient`, `sign`,
   `linkage_ratio`) is stored unchanged.
 - Pulse widths keep their microsecond unit because they are servo command counts, not
@@ -213,10 +216,14 @@ Rules:
 - Action `a_k` is applied starting at control step `k + action_delay_steps`
   (`1` by default), that is during `[t_{k+1}, t_{k+2})`. Until then the previous action
   stays applied. The delay models compute time and servo command latency on the board.
+- The flight computer sits on the pad for `pad_hold_time_s` (training YAML) calibrating its
+  sensors; the launch command goes out at the first control step at or after that time.
+- The action delay applies to the whole command, igniter commands included.
 - Sensors are three axis (specific force and angular rate in the body frame) plus a
   barometer. They sample at their own rates from the sensor YAML. A sample taken at time `t` reflects
   the true state at `t - lag`. Between samples the last value is held.
-- The log records one row per physics step. The firmware log has the same columns.
+- The log records one row per physics step. The firmware log has the same columns. Sensor
+  columns hold the latest sample, estimate columns the estimate after that sample.
 
 ## Pitch and yaw on the flight computer
 
@@ -238,10 +245,106 @@ loop rotates them by the roll angle into the body servo commands,
 roll is zero. Each run also produces the continuous ignition output; the control loop averages
 the two and applies the threshold once.
 
-## Phases (used from stage 2)
+## Sensors
 
-`PAD -> BOOST -> COAST -> DESCENT -> LANDING_BURN -> LANDED`, with `ABORT` reachable from any
-flight phase. Transition rules and which controller owns each phase come from the rocket YAML.
+The sensor YAML (`configs/sensors/*.yaml`, referenced from the rocket file's `sensors.file`)
+describes one IMU and one barometer.
+
+- The IMU reads specific force `f = R^T (a - g)` with `g = (0, 0, -gravity)` and the angular
+  rate `omega`, both in the body frame. At rest and upright it reads `(0, 0, +gravity)`.
+  While the rocket is held on the pad its acceleration is zero whatever the thrust.
+- Each sensor samples at `rate_hz`. A sample at time `t` shows the truth at `t - lag_s`, plus a
+  bias drawn once per flight from a normal distribution with `bias_std`, plus white noise
+  with `noise_std`, clipped to `+-range`. The barometer reads the altitude of the centre of
+  gravity.
+- The IMU rate must not exceed the physics rate; the estimator integrates with `1 / rate_hz`.
+
+## Estimator
+
+Runs in float32 with the same operations in the same order as the C version.
+
+- On the pad it keeps the last `pad_average_time_s` of samples. At liftoff the gyro mean
+  becomes the gyro bias, the accelerometer mean gives the initial attitude (the rotation with
+  zero roll that takes the measured gravity direction to `+z`), and the barometer mean minus
+  the known pad altitude of the centre of gravity becomes the barometer offset. Position
+  starts at `(0, 0, pad_cg_height)` with zero velocity.
+- Each IMU sample in flight: `rate = gyro - bias`; `q += 0.5 * dt * q * (0, rate)`, normalise;
+  `a_world = R(q) f + g`; `v += a_world * dt`; `p += v * dt` (velocity first, then position).
+- Each barometer sample in flight: `alt_now = baro - offset + vz * lag`;
+  `err = alt_now - z`; `z += baro_altitude_gain * err`; `vz += baro_velocity_gain_per_s * err`.
+- Height of the feet above the ground is `z - pad_cg_height`. Tilt angles, tilt rates and
+  roll come from `quaternion.py` applied to the estimated quaternion and rate.
+
+## Phases
+
+`PAD -> BOOST -> COAST -> DESCENT -> LANDING_BURN -> LANDED`, with `ABORT` reachable from
+`BOOST`. Thresholds live in the rocket YAML `phases` section.
+
+- `PAD -> BOOST`: the IMU body axis specific force exceeds `liftoff_accel_mps2`. This is
+  checked on every IMU sample so the estimator starts integrating at once.
+- `BOOST -> COAST`: at least `min_boost_time_s` after liftoff and the body axis specific force
+  below `burnout_accel_mps2`.
+- `BOOST -> ABORT`: estimated tilt above `abort_tilt_deg`. In `ABORT` the gimbal is centred
+  and no igniter command goes out.
+- `COAST -> DESCENT`: estimated vertical speed below `apogee_vz_mps`.
+- `COAST` or `DESCENT -> LANDING_BURN`: a landing igniter command passes the safety checks.
+- `-> LANDED`: touchdown.
+
+The gimbal is controlled in `BOOST` and `LANDING_BURN`; in every other phase it is centred and
+the PID integrators are reset.
+
+## Landing trigger
+
+For a solid landing motor the only decision is when to send the igniter command.
+
+- At start-up the flight computer integrates the landing burn in one dimension for every
+  downward speed from 0 to 80 m/s in 0.5 m/s steps: thrust from the curve times
+  `thrust_margin`, mass `dry + empty ascent case + full landing motor` minus propellant burned
+  along the curve, gravity, and drag with the air density at ground level. The distance
+  fallen until the speed drops to `target_speed_mps` (or the motor burns out) plus
+  `target_height_m` is the required height for that speed.
+- The table is consulted in `DESCENT` only. The command goes out when the height and speed the
+  rocket will have when thrust starts,
+  `delay = igniter mean delay + (action_delay_steps + 0.5) * control period` from now, satisfy
+  `height_then <= required(speed_then)`.
+- A solid cannot be throttled, so this only works when the hard part of the burn can take
+  the descent speed at the crossing down to the target speed with a small margin. Too little
+  impulse leaves speed the tail cannot remove; too much stops the rocket in the air and it
+  climbs on the leftover thrust. Matching that impulse is part of the rocket design.
+
+## PID baseline
+
+Per plane, on the estimate, at the control rate, with `hold_position` in `BOOST` and
+`LANDING_BURN`:
+
+```
+tilt_cmd = clip(-(kp_deg_per_m * lateral + kd_deg_per_mps * lateral_velocity), +-max_tilt_command)
+error    = tilt_cmd - tilt
+integral = clip(integral + error * dt, +-max_integral / ki)
+delta    = kp * error + ki * integral - kd * tilt_rate
+```
+
+`delta_x` and `delta_y` are then rotated by `-roll` into the pitch and yaw servo commands.
+
+## Safety
+
+Applied to every command, PID or policy, before it reaches the actuators:
+
+- Gimbal commands are clipped to `+-max_angle`.
+- The ascent igniter may only be commanded in `PAD`.
+- The landing igniter may only be commanded in `COAST` or `DESCENT`, at least
+  `landing_ignition_lockout_s` after liftoff, with the estimated tilt at most
+  `max_landing_ignition_tilt_deg` and the estimated feet height at most
+  `max_landing_ignition_height_m`.
+- In `ABORT` everything is zero and nothing ignites.
+
+## Actuators
+
+- Servo commands are accepted once per control step, after the action delay, and go through
+  the servo model in the order given in the Gimbal section; the pure delay and the rate limit
+  advance once per physics step, so the actual gimbal angle changes every physics step.
+- An igniter command starts the motor after a delay drawn once per flight, uniform in
+  `mean +- spread` and never negative. A second command to the same motor does nothing.
 
 ## State vector layout in code
 

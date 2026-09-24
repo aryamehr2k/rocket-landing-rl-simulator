@@ -13,6 +13,7 @@ RATE_RATIO_TOLERANCE = 1e-9
 class SimulationConfig:
     physics_rate_hz: float
     max_flight_time: float
+    pad_hold_time: float
 
     @property
     def dt(self) -> float:
@@ -48,7 +49,7 @@ def load_sim_config(path: str | Path) -> SimConfig:
     data, source = read_yaml_mapping(path)
     root = Section(data, source)
     sim = root.sub("simulation")
-    sim.only_keys("physics_rate_hz", "max_flight_time_s")
+    sim.only_keys("physics_rate_hz", "max_flight_time_s", "pad_hold_time_s")
     env = root.sub("environment")
     env.only_keys("site_elevation_m", "gravity_mps2", "sea_level_density_kgpm3", "scale_height_m")
     wind = root.sub("wind")
@@ -57,6 +58,7 @@ def load_sim_config(path: str | Path) -> SimConfig:
         simulation=SimulationConfig(
             physics_rate_hz=sim.number("physics_rate_hz", above=0.0),
             max_flight_time=sim.number("max_flight_time_s", above=0.0),
+            pad_hold_time=sim.number("pad_hold_time_s", minimum=0.0),
         ),
         environment=EnvironmentConfig(
             site_elevation=env.number("site_elevation_m", minimum=0.0),

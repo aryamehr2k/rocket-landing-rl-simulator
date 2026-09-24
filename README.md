@@ -6,11 +6,13 @@ whole thing from the pad to touchdown in three dimensions, trains a landing poli
 reinforcement learning, checks that policy against a plain PID controller, and exports it as
 C code that runs on the rocket's flight computer.
 
-The project is being built in stages. Right now stage 1 is done: configuration loading,
-motor files, six degree of freedom flight physics, an open loop vertical test flight with a
-plot, and two ways to watch a flight as a 3D animation. Later stages add the servo and sensor
-models, the estimator, the PID baseline, the Gymnasium environment, training, the C firmware
-and the hardware in the loop bridge.
+The project is being built in stages. Stages 1 and 2 are done: configuration loading, motor
+files, six degree of freedom flight physics, servo and sensor models, the onboard state
+estimator, flight phases, a landing burn trigger, a PID controller, a safety layer, a closed
+loop simulation with wind, flight logs, plots and two ways to watch a flight in 3D. With the
+example rocket the PID lands about 7 flights in 10 in calm air and 6 in 10 in a 4 m/s gusty
+crosswind; the section on the landing burn explains why not more. Later stages add the
+Gymnasium environment, training, the C firmware and the hardware in the loop bridge.
 
 All the numbers in `configs/rockets/example_tvc.yaml` and `configs/motors/` are stand-ins.
 Replace them with values measured from your rocket: masses from a scale, centre of gravity
@@ -56,8 +58,18 @@ for it and Stable-Baselines3 2.4 needs numpy 1.x.
   `rocketsim/touchdown.py` has the leg geometry, ground contact and the landing grade.
   Neither imports anything from RL, so they can be tested on their own.
 - `rocketsim/flightlog.py` writes every flight as a CSV with a fixed set of columns.
-- `scripts/fly_scripted.py` flies the rocket without any controller (stage 1) and with the
-  PID baseline (from stage 2).
+- `rocketsim/sensors.py` reads the sensor YAML and samples an IMU and a barometer with rate,
+  lag, bias and noise. `rocketsim/actuators.py` is the servo model (clip, deadband, pulse
+  steps, delay, rate limit) and the igniter delay.
+- `rocketsim/estimator.py`, `rocketsim/phases.py`, `rocketsim/landing_trigger.py`,
+  `rocketsim/pid.py` and `rocketsim/safety.py` are the parts of the flight computer, and
+  `rocketsim/flightcomputer.py` wires them together. `rocketsim/guidance_config.py` reads
+  their settings from the rocket YAML. None of this sees the true state, only sensors.
+- `rocketsim/simulation.py` is the closed loop: sensors, flight computer, actuators, physics
+  and log, one control step at a time. The scripted flight and, later, the Gymnasium
+  environment both drive it.
+- `scripts/fly_scripted.py` flies the rocket with the flight computer's PID and trigger, or
+  open loop, once or over many seeds.
 - `scripts/plot_flight.py` plots one flight log. `scripts/animate_flight.py` renders it as a
   GIF or MP4, and `viewer/flight_viewer.html` shows it in the browser. `scripts/bundle_viewer.py`
   packs the viewer and one flight into a single HTML file and `scripts/serve_viewer.py` serves
@@ -87,17 +99,25 @@ The file has these sections:
   touchdown vertical speed, lateral speed and tilt. The tip-over angle is computed from the
   footprint and the centre of gravity height, not typed in.
 - `control`: control loop rate and how many control steps an action is delayed.
+- `sensors`: the sensor YAML to use, see below.
+- `estimator`, `phases`, `landing_trigger`, `pid`, `safety`: what runs on the flight
+  computer. The README section on the landing burn and `docs/conventions.md` explain each
+  value; the comments in the example file say what they do in one line.
 
 A note on fins, because it decides whether the rocket can land at all. A rocket with the
 centre of pressure behind the centre of gravity is stable nose-first, which is what fins are
 for on a normal model rocket. The same geometry makes tail-first flight unstable: once the
-rocket starts falling, any small tilt grows exponentially until it is nose-down, and the
-margin only sets how fast. A solid landing motor cannot buy time to recover from that. The
-example rocket therefore has only vestigial fins and its centre of pressure sits a little
-ahead of the centre of gravity at ascent burnout. It is unstable on the way up, which is what
-the thrust vector control is for, and settles tail-first on the way down. Judge the margin at
-burnout, not on the pad, because the motors sit at the tail and the centre of gravity moves
-forward as propellant burns. The simulator models both cases, so you can see what your own
+rocket starts falling, any small tilt grows exponentially until it is nose-down. The opposite
+choice, centre of pressure ahead of the centre of gravity, makes the unpowered coast after
+burnout unstable instead: the simulator showed a 14 mm margin turning a 1 degree tilt at
+burnout into 30 degrees at apogee, and the landing motor then lit with the rocket far from
+vertical. There is no thrust during the coast or the descent, so the gimbal cannot help in
+either case. The example rocket therefore has only vestigial fins and its centre of pressure
+sits at the centre of gravity after the ascent burn, where it is neutral: whatever tilt and
+turning rate it has at burnout it keeps, slowly, until the landing burn takes over. It is
+unstable during both burns, which is what the thrust vector control is for. Judge the margin
+at burnout, not on the pad, because the motors sit at the tail and the centre of gravity moves
+forward as propellant burns. The simulator models all of this, so you can see what your own
 fins do before you build them.
 
 ## Adding a motor
@@ -105,7 +125,7 @@ fins do before you build them.
 Drop the `.eng` file from ThrustCurve.org into `configs/motors/` and point the rocket file at
 it. The `.eng` header gives the propellant and total mass, and the pairs after it are the
 thrust curve. If you measured a curve yourself, write it as YAML like
-`configs/motors/example_f30_landing.yaml`: a list of `[time_s, thrust_n]` pairs plus the
+`configs/motors/example_g120_landing.yaml`: a list of `[time_s, thrust_n]` pairs plus the
 masses. Propellant mass flow follows the thrust curve, so mass and centre of gravity change
 during the burn. A motor YAML may carry a default `ignition_delay_s`; the rocket file can
 override it.
@@ -114,20 +134,72 @@ Solid motors cannot throttle or restart. For solids the landing decision is when
 ignition command and how to steer the gimbal during the burn. A YAML motor with
 `throttleable: true` also gets a throttle input with a first order lag.
 
-## Flying the open loop test flight
+## The landing burn
+
+This is the part of the project that decides everything else, so it gets its own section.
+
+The flight computer builds a table at start-up: for every descent speed, how far the rocket
+falls from the moment the landing motor lights until the burn has brought it down to
+`target_speed_mps`. It does this by integrating the motor's thrust curve, the rocket's mass,
+gravity and drag in one dimension. In flight it watches the estimated height and speed,
+adds the igniter delay and its own control loop latency, and sends the igniter command the
+moment the height it will have when thrust starts drops to the table value plus
+`target_height_m`. That is all a solid motor allows: one decision, made once.
+
+The catch is that the burn's impulse is fixed. If the hard part of the burn is too weak for
+the speed the rocket has at that crossing, the rocket reaches the ground with speed left. If
+it is too strong, the rocket stops in the air and climbs on the leftover thrust, then falls
+from wherever the burn ends. With the example rocket the window between the two is about one
+metre per second of impulse, or a metre of ignition height. The igniter delay spread of
+0.03 s alone is worth a metre at 36 m/s. That is why the PID baseline lands 7 in 10, not 10
+in 10, and why the example landing motor has the shape it has: a hard part matched to the
+descent speed at the crossing, a very short ramp, and a long tail with thrust a little below
+the weight so the rocket sinks the last metre and a half slowly. Read the comments in
+`configs/motors/example_g120_landing.yaml`.
+
+For your rocket this means three things. Measure your igniter delay and its spread; it
+matters more than any gain. Pick the landing motor and the apogee together, because the
+motor's hard impulse must match the speed the rocket has when its stopping distance equals
+its height. And expect the trained policy to beat the trigger by doing things a fixed rule
+cannot, such as tilting during the hard burn to throw away excess thrust.
+
+## Adding sensors
+
+`configs/sensors/example_imu.yaml` describes the IMU and the barometer: sample rate, lag, the
+standard deviation of the bias drawn once per flight, the noise per sample and the range.
+The estimator calibrates the biases away on the pad during `pad_hold_time_s`, so what hurts
+the landing is drift during the flight and the barometer lag, which it corrects with the
+estimated vertical speed. Replace the numbers with what you measure with the board sitting
+still on a table; the datasheet noise density times the square root of the bandwidth is a
+fair start.
+
+## Flying
 
 ```
-python scripts/fly_scripted.py --out runs/vertical.csv --plot
+python scripts/fly_scripted.py --out runs/landing.csv --plot
+python scripts/fly_scripted.py --sim configs/training/windy.yaml --out runs/windy.csv --plot
+python scripts/fly_scripted.py --episodes 20 --seed 1 --wind-mps 3 --gust-mps 1
 ```
 
-This ignites the ascent motor on the pad with both gimbal servos at zero and lets the rocket
-fly ballistically until it hits the ground. It prints the apogee and the touchdown numbers
-and writes `runs/vertical.csv` and `runs/vertical.png`. `--gimbal-pitch-deg` and
-`--gimbal-yaw-deg` hold the gimbal at a fixed angle (the rocket then tips over, which is a
-good way to see the sign conventions), and `--landing-ignite-at` lights the landing motor at
-a given time, which is a quick way to feel how sensitive a landing burn is to timing. With the
-example rocket the vertical flight reaches about 115 m and, with no landing burn, hits the
-ground at about 45 m/s.
+The first command flies the whole thing closed loop: the flight computer calibrates on the
+pad for two seconds, launches, holds the rocket upright through the boost, waits through the
+coast and the descent, lights the landing motor from its table and steers the landing. It
+prints the phase times, anything the safety layer refused, and the touchdown numbers, and
+writes the CSV and a PNG. The second uses a training YAML with a 4 m/s gusty crosswind. The
+third repeats the flight over twenty seeds, each with its own sensor errors, igniter delays
+and gusts, and prints one line per flight plus how many landed. `--wind-mps`,
+`--wind-direction-deg` and `--gust-mps` override the training YAML.
+
+```
+python scripts/fly_scripted.py --open-loop --out runs/vertical.csv --plot
+```
+
+`--open-loop` switches the PID and the trigger off: the gimbal is held at
+`--gimbal-pitch-deg` and `--gimbal-yaw-deg` (the rocket then tips over, which is a good way
+to see the sign conventions) and `--landing-ignite-at` sends the landing igniter command at a
+given time, subject to the same safety checks as the flight computer. With the example rocket
+the vertical flight reaches about 105 m and, with no landing burn, hits the ground at about
+44 m/s.
 
 To plot a log you already have:
 
@@ -191,4 +263,8 @@ The tests cover unit conversion, config validation messages, motor file parsing,
 quaternion maths, one derivative evaluation and one RK4 step against numbers worked out by
 hand, energy and angular momentum conservation in a vacuum, the mirror symmetry of the pitch
 and yaw planes, a vertical burn that must stay exactly vertical, the pad hold, the touchdown
-geometry with four legs and the flight log round trip.
+geometry with four legs and the flight log round trip. Stage 2 adds the servo model step by
+step, sensor rates, lag and bias, the estimator's pad calibration, integration and barometer
+fusion, the phase sequence, the PID signs, the trigger table against a constant deceleration,
+the safety refusals, and the whole closed loop: the example rocket must land in calm air,
+the same seed must give the same flight, and the open loop action path must work.

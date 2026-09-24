@@ -8,6 +8,7 @@ import math
 from dataclasses import dataclass
 from pathlib import Path
 
+from rocketsim.guidance_config import SECTION_KEYS, FlightComputerConfig, load_flight_computer_config
 from rocketsim.motors import MotorFileError, MotorSpec, load_motor
 from rocketsim.units import MM_PER_M, rad_to_deg
 from rocketsim.yaml_section import ConfigError, Section, read_yaml_mapping
@@ -112,6 +113,7 @@ class RocketConfig:
     gimbal: GimbalConfig
     legs: LegsConfig
     control: ControlConfig
+    computer: FlightComputerConfig
     source: str
 
     def motor(self, role: str) -> MotorConfig:
@@ -129,12 +131,25 @@ class RocketConfig:
     def reference_area(self) -> float:
         return math.pi * self.airframe.reference_diameter ** 2 / 4.0
 
+    @property
+    def loaded_cg(self) -> float:
+        """Centre of gravity station with every motor full, as on the pad."""
+        dry = self.airframe
+        mass = dry.dry_mass + sum(motor.spec.total_mass for motor in self.motors)
+        moment = dry.dry_mass * dry.dry_cg + sum(motor.spec.total_mass * motor.position for motor in self.motors)
+        return moment / mass
+
+    @property
+    def pad_cg_height(self) -> float:
+        """Height of the centre of gravity above the ground when standing on the pad."""
+        return self.feet_station - self.loaded_cg
+
 
 def load_rocket_config(path: str | Path) -> RocketConfig:
     """Load and validate a rocket YAML. Motor file paths are relative to the rocket file."""
     data, source = read_yaml_mapping(path)
     root = Section(data, source)
-    root.only_keys("name", "airframe", "aero", "motors", "gimbal", "legs", "control")
+    root.only_keys("name", "airframe", "aero", "motors", "gimbal", "legs", "control", *SECTION_KEYS)
     airframe = _airframe(root.sub("airframe"))
     length_mm = airframe.length * MM_PER_M
     aero_section = root.sub("aero")
@@ -157,7 +172,11 @@ def load_rocket_config(path: str | Path) -> RocketConfig:
         control_rate_hz=control_section.number("control_rate_hz", above=0.0),
         action_delay_steps=control_section.integer("action_delay_steps", minimum=0),
     )
-    return RocketConfig(root.string("name"), airframe, aero, motors, gimbal, legs, control, source)
+    computer = load_flight_computer_config(root, Path(source).parent)
+    return RocketConfig(
+        name=root.string("name"), airframe=airframe, aero=aero, motors=motors, gimbal=gimbal, legs=legs,
+        control=control, computer=computer, source=source,
+    )
 
 
 def _airframe(section: Section) -> AirframeConfig:

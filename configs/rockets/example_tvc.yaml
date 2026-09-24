@@ -16,7 +16,7 @@ airframe:
 aero:
   drag_coefficient: 0.60
   normal_force_slope_per_rad: 2.0   # mostly nose cone lift, only vestigial fins
-  cp_from_nose_mm: 480.0            # a little ahead of the burnout CG on purpose, see README
+  cp_from_nose_mm: 494.0            # at the CG after the ascent burn on purpose, see README
 
 motors:
   ascent:
@@ -25,10 +25,10 @@ motors:
     gimbaled: true
     ignition_delay_s: {mean: 0.10, spread: 0.05}
   landing:
-    file: ../motors/example_f30_landing.yaml
+    file: ../motors/example_g120_landing.yaml
     position_from_nose_mm: 690.0
     gimbaled: true
-    ignition_delay_s: {mean: 0.15, spread: 0.08}
+    ignition_delay_s: {mean: 0.15, spread: 0.03}
 
 gimbal:
   pivot_from_nose_mm: 840.0
@@ -65,3 +65,41 @@ legs:
 control:
   control_rate_hz: 50
   action_delay_steps: 1
+
+# Everything below runs on the flight computer. The firmware reads the same values.
+
+sensors:
+  file: ../sensors/example_imu.yaml
+
+estimator:
+  pad_average_time_s: 1.0         # pad samples averaged for the gyro bias, the attitude and the barometer offset
+  baro_altitude_gain: 0.10        # share of each barometer error applied to the altitude
+  baro_velocity_gain_per_s: 0.50  # barometer error times this is added to the vertical speed
+
+phases:
+  liftoff_accel_mps2: 12.0        # specific force along the body axis that means the pad has let go
+  burnout_accel_mps2: 3.0         # below this during BOOST the ascent motor is done
+  min_boost_time_s: 0.5
+  apogee_vz_mps: -1.0             # estimated vertical speed below this in COAST means DESCENT
+  abort_tilt_deg: 40.0            # tilt during BOOST that centres the gimbal and gives up
+
+landing_trigger:
+  target_speed_mps: 0.5           # what the hard part of the burn should bring the descent speed down to
+  target_height_m: 1.5            # feet height where that happens; the tail of the burn does the rest
+  thrust_margin: 1.0              # share of the thrust curve the table counts on; below 1 it lights early and the rocket climbs
+
+pid:
+  attitude:                       # tilt error to gimbal angle, per plane
+    kp: 0.60
+    ki_per_s: 0.0
+    kd_s: 0.12
+    max_integral_deg: 3.0         # largest gimbal angle the integral term may add
+  position:                       # lateral position and speed to a tilt command
+    kp_deg_per_m: 0.3             # weak on purpose: killing sideways speed matters, the miss distance does not
+    kd_deg_per_mps: 8.0
+    max_tilt_command_deg: 12.0
+
+safety:
+  landing_ignition_lockout_s: 2.5           # after liftoff the landing motor may not be lit
+  max_landing_ignition_tilt_deg: 35.0
+  max_landing_ignition_height_m: 120.0

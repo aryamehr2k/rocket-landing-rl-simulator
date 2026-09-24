@@ -46,6 +46,8 @@ Converter = Callable[[float], float]
 
 SUFFIX_CONVERSIONS: list[tuple[str, Converter]] = [
     ("_us_per_deg", us_per_deg_to_us_per_rad),
+    ("_deg_per_mps", deg_to_rad),
+    ("_deg_per_m", deg_to_rad),
     ("_deg_per_s", deg_to_rad),
     ("_kgm2", identity),
     ("_mps2", identity),

@@ -1,9 +1,10 @@
 # Simulation environment and training settings.
-# Stage 1 uses the simulation, environment and wind sections. Later stages add more.
+# Stage 2 uses the simulation, environment and wind sections. Later stages add more.
 
 simulation:
   physics_rate_hz: 200
   max_flight_time_s: 60.0
+  pad_hold_time_s: 2.0        # the flight computer calibrates on the pad, then the launch command goes out
 
 environment:
   site_elevation_m: 300.0

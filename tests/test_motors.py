@@ -122,7 +122,7 @@ def test_load_motor_by_extension(tmp_path: Path) -> None:
 def test_example_motor_files_load() -> None:
     root = Path(__file__).resolve().parent.parent / "configs" / "motors"
     ascent = load_motor(root / "example_g40.eng")
-    landing = load_motor(root / "example_f30_landing.yaml")
+    landing = load_motor(root / "example_g120_landing.yaml")
     assert 80.0 < ascent.total_impulse < 160.0
-    assert 40.0 < landing.total_impulse < 80.0
+    assert 100.0 < landing.total_impulse < 140.0
     assert math.isclose(ascent.propellant_burned_at(ascent.burn_time), ascent.propellant_mass)

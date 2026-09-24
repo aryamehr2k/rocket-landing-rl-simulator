@@ -1,0 +1,35 @@
+# Stand-in landing motor for the example rocket. Not a real motor.
+# Replace the curve with the measured thrust curve of the motor you fly.
+#
+# The shape matters more than the class. A solid cannot throttle, so the only way to make a
+# landing forgiving of igniter timing is a regressive curve: a hard first part that kills the
+# descent speed, then a long tail with thrust a little below the rocket's weight so it sinks
+# slowly for several seconds and the touchdown can happen anywhere in that window. With a
+# flat curve the touchdown speed depends on the ignition time to within a few hundredths of a
+# second, which no igniter delivers.
+#
+# The hard part is matched to the example rocket: it must take the descent speed the rocket
+# has when its stopping distance equals its height (about 36 m/s for a 105 m apogee) down to
+# walking pace, and then stop. Half a second too short and the tail cannot save it; half a
+# second too long and the rocket stops in the air and climbs on the leftover thrust. Change
+# the apogee and this curve must change with it, or the landing needs a way to dump thrust.
+name: EXAMPLE_G120_LANDING
+propellant_mass_g: 89
+total_mass_g: 165
+diameter_mm: 29
+length_mm: 240
+throttleable: false
+throttle_lag_s: 0.0
+# Default ignition delay for this motor and igniter. The rocket file may override it.
+ignition_delay_s:
+  mean: 0.15
+  spread: 0.03
+# [time_s, thrust_n] pairs, times strictly increasing, last thrust zero. About 120 N s.
+thrust_curve:
+  - [0.00, 0.0]
+  - [0.05, 30.0]
+  - [0.12, 46.0]
+  - [1.60, 44.0]
+  - [1.75, 12.6]     # tail: about 0.93 of the weight, so the rocket sinks slowly
+  - [5.40, 12.5]
+  - [5.60, 0.0]

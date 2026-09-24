@@ -16,7 +16,17 @@ from rocketsim.config import (
     RocketConfig,
     ServoCalibration,
 )
+from rocketsim.guidance_config import (
+    EstimatorConfig,
+    FlightComputerConfig,
+    LandingTriggerConfig,
+    PhaseConfig,
+    PidConfig,
+    PidGains,
+    SafetyConfig,
+)
 from rocketsim.motors import MotorSpec
+from rocketsim.sensors import BarometerConfig, ImuChannelConfig, ImuConfig, SensorsConfig
 from rocketsim.simconfig import EnvironmentConfig, WindConfig
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -45,6 +55,35 @@ def make_servo() -> ServoCalibration:
         pulse_resolution_us=1.0,
         min_us=1000.0,
         max_us=2000.0,
+    )
+
+
+def make_sensors(noise: bool = False) -> SensorsConfig:
+    """200 Hz IMU and 50 Hz barometer, perfect unless noise is asked for."""
+    scale = 1.0 if noise else 0.0
+    return SensorsConfig(
+        name="test",
+        imu=ImuConfig(
+            rate_hz=200.0, lag=0.0,
+            accelerometer=ImuChannelConfig(noise_std=0.05 * scale, bias_std=0.02 * scale, range=156.0),
+            gyroscope=ImuChannelConfig(noise_std=math.radians(0.1) * scale, bias_std=math.radians(0.5) * scale, range=math.radians(2000.0)),
+        ),
+        barometer=BarometerConfig(rate_hz=50.0, lag=0.0, noise_std=0.3 * scale, bias_std=1.0 * scale),
+        source="<test>",
+    )
+
+
+def make_computer(noise: bool = False) -> FlightComputerConfig:
+    return FlightComputerConfig(
+        sensors=make_sensors(noise),
+        estimator=EstimatorConfig(pad_average_time=0.5, baro_altitude_gain=0.1, baro_velocity_gain=0.5),
+        phases=PhaseConfig(liftoff_accel=12.0, burnout_accel=3.0, min_boost_time=0.5, apogee_vz=-1.0, abort_tilt=math.radians(40.0)),
+        landing_trigger=LandingTriggerConfig(target_speed=1.0, target_height=0.5, thrust_margin=0.95),
+        pid=PidConfig(
+            attitude=PidGains(kp=0.6, ki=0.0, kd=0.12, max_integral=math.radians(3.0)),
+            position_kp=math.radians(1.5), position_kd=math.radians(5.0), max_tilt_command=math.radians(8.0),
+        ),
+        safety=SafetyConfig(landing_ignition_lockout=2.5, max_landing_ignition_tilt=math.radians(25.0), max_landing_ignition_height=120.0),
     )
 
 
@@ -82,6 +121,7 @@ def make_rocket(
             max_tilt=math.radians(10.0),
         ),
         control=ControlConfig(control_rate_hz=50.0, action_delay_steps=1),
+        computer=make_computer(),
         source="<test>",
     )
 
