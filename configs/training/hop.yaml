@@ -1,4 +1,4 @@
-# Training the AI that flies the electric test vehicle through the whole mission:
+# Training the network that flies the electric test vehicle through the whole mission:
 # launch, climb, hover, descent and landing. Run with: python scripts/train.py --training configs/training/hop.yaml
 
 task: hop
@@ -22,12 +22,12 @@ wind:                           # used by single test flights; training takes it
   gust_std_mps: 0.0
   gust_time_constant_s: 2.0
 
-controllers:                    # the AI flies both steering and throttle
+controllers:                    # the network flies both steering and throttle
   steering: policy
   throttle: policy
-  mode: direct                  # direct: the AI's commands go out; residual: they correct the PID's
+  mode: direct                  # direct: the network's commands go out; residual: they correct the PID's
 
-observation:                    # what the AI sees, from the flight computer's estimate, each value divided by its scale
+observation:                    # what the network sees, from the flight computer's estimate, each value divided by its scale
   fields:
     - {name: height_error, scale: 10.0}           # reference height minus estimated height, m
     - {name: vertical_speed_error, scale: 5.0}    # reference minus estimated vertical speed, m/s
@@ -69,7 +69,7 @@ hidden_errors:                  # differences between the vehicle file and the r
   thrust_scale: [0.92, 1.08]    # fan thrust, battery state
   dry_mass_g: [-80, 80]
 
-mission_variation:              # train on many missions so the AI follows whatever the mission file says
+mission_variation:              # train on many missions so the network follows whatever the mission file says
   target_altitude_m: [10, 60]
   hover_time_s: [3, 12]
 

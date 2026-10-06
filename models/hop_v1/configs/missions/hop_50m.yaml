@@ -1,0 +1,25 @@
+# Flight plan for the electric test vehicle: climb to 50 m, hold 10 s, land within 10 m of the pad.
+# Heights are of the landing feet above the pad. The controller follows a reference built from
+# these numbers; the criteria below decide pass or fail.
+
+name: hop_50m
+
+ascent:
+  target_altitude_m: 50.0
+  climb_speed_mps: 4.0           # steady climb rate
+  climb_acceleration_mps2: 1.5   # how fast the reference speeds up and slows down
+
+hover:
+  time_s: 10.0                   # required hold at the target height
+  extra_time_s: 2.0              # the reference hovers this much longer so the 10 s are met with margin
+
+descent:
+  descent_speed_mps: 3.0
+  final_height_m: 4.0            # below this height the vehicle slows to the final speed
+  final_speed_mps: 0.7           # touchdown speed the reference aims for
+
+criteria:
+  altitude_tolerance_m: 2.0      # counts as at the target height when within this band
+  landing_radius_m: 10.0         # touchdown must be this close to the pad
+
+max_flight_time_s: 90.0

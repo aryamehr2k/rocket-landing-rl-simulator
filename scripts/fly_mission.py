@@ -1,6 +1,6 @@
 """Fly the electric vehicle's mission (launch, climb, hover, descent, landing) with the PID or a trained model.
 
-Usage: python scripts/fly_mission.py --model models/hop_latest --flights 50 --compare --wind-mps 4 --animate
+Usage: python scripts/fly_mission.py --model models/hop_v1 --flights 50 --compare --wind-mps 4 --animate
 """
 
 import argparse
@@ -33,7 +33,7 @@ def parse() -> argparse.Namespace:
     parser.add_argument("--vehicle", default=DEFAULT_VEHICLE)
     parser.add_argument("--mission", default=DEFAULT_MISSION)
     parser.add_argument("--world", default=DEFAULT_WORLD, help="training YAML that gives the simulation settings and the hidden error ranges")
-    parser.add_argument("--model", help="model folder (models/<name>) for the AI; without it the PID flies")
+    parser.add_argument("--model", help="model folder (models/<name>) for the network; without it the PID flies")
     parser.add_argument("--seed", type=int, default=100)
     parser.add_argument("--flights", type=int, default=1)
     parser.add_argument("--compare", action="store_true", help="also fly the PID on the same seeds (with --model)")

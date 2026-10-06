@@ -38,7 +38,7 @@ def training_yaml(name: str, sheet: Datasheet, d: Derived, base_text: str, base_
     ):
         _set_value(lines, section, key, value)
     header = (
-        f"# Training the AI that flies {name} through the whole mission: launch, climb, hover, descent, landing.\n"
+        f"# Training the network that flies {name} through the whole mission: launch, climb, hover, descent, landing.\n"
         f"{built_from(f'{sheet.source} and {base_label}')}\n"
         f"# Run with: python scripts/train.py --training configs/training/{name}.yaml\n\n"
     )

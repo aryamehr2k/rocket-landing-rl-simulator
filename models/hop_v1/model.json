@@ -1,0 +1,223 @@
+{
+  "name": "hop_v1",
+  "created": "2026-10-06T10:49:09",
+  "source_run": "20261006_094332_hop_residual",
+  "task": "hop",
+  "network": {
+    "layer_sizes": [
+      15,
+      64,
+      64,
+      2
+    ],
+    "activation": "tanh",
+    "parameters": 5314
+  },
+  "input_rule": "x[i] = clip((raw[i] / scale[i] - mean[i]) / std[i], -clip, +clip); the network runs once with the pitch plane values (x, vx, tilt toward +x) and once with the yaw plane values (y, vy, tilt toward +y)",
+  "input_clip": 10.0,
+  "inputs": [
+    {
+      "index": 0,
+      "name": "height_error",
+      "scale": 10.0,
+      "mean": 0.0025582185480743647,
+      "std": 0.04044818878173828,
+      "meaning": "mission reference height minus estimated height, m"
+    },
+    {
+      "index": 1,
+      "name": "vertical_speed_error",
+      "scale": 5.0,
+      "mean": 0.0036021340638399124,
+      "std": 0.09796465933322906,
+      "meaning": "mission reference vertical speed minus estimated vertical speed, m/s"
+    },
+    {
+      "index": 2,
+      "name": "reference_speed",
+      "scale": 5.0,
+      "mean": 0.006357776001095772,
+      "std": 0.49573275446891785,
+      "meaning": "mission reference vertical speed, m/s"
+    },
+    {
+      "index": 3,
+      "name": "height",
+      "scale": 50.0,
+      "mean": 0.45447298884391785,
+      "std": 0.3398734927177429,
+      "meaning": "estimated height of the landing feet above the pad, m"
+    },
+    {
+      "index": 4,
+      "name": "vertical_speed",
+      "scale": 10.0,
+      "mean": 0.001377819455228746,
+      "std": 0.26007553935050964,
+      "meaning": "estimated vertical speed, m/s, positive up"
+    },
+    {
+      "index": 5,
+      "name": "lateral_position",
+      "scale": 10.0,
+      "mean": 0.048342060297727585,
+      "std": 0.15855266153812408,
+      "meaning": "estimated x (pitch plane run) or y (yaw plane run) from the pad, m"
+    },
+    {
+      "index": 6,
+      "name": "lateral_speed",
+      "scale": 5.0,
+      "mean": 0.0016282327705994248,
+      "std": 0.05205559358000755,
+      "meaning": "estimated vx or vy, m/s"
+    },
+    {
+      "index": 7,
+      "name": "tilt",
+      "scale": 0.5,
+      "mean": 0.00031920094625093043,
+      "std": 0.08163958042860031,
+      "meaning": "lean of the nose toward +x (pitch run) or +y (yaw run), rad"
+    },
+    {
+      "index": 8,
+      "name": "tilt_rate",
+      "scale": 2.0,
+      "mean": -6.193066656123847e-05,
+      "std": 0.0692363902926445,
+      "meaning": "rate of that lean, rad/s"
+    },
+    {
+      "index": 9,
+      "name": "gimbal",
+      "scale": 0.17,
+      "mean": 0.062128081917762756,
+      "std": 0.11461418867111206,
+      "meaning": "this plane's previous gimbal command from the network, rad"
+    },
+    {
+      "index": 10,
+      "name": "throttle",
+      "scale": 1.0,
+      "mean": 0.5282146334648132,
+      "std": 0.16219215095043182,
+      "meaning": "throttle command of the previous step, 0 to 1"
+    },
+    {
+      "index": 11,
+      "name": "phase_ascent",
+      "scale": 1.0,
+      "mean": 0.3102424740791321,
+      "std": 0.46259281039237976,
+      "meaning": "1 while climbing to the target height, else 0"
+    },
+    {
+      "index": 12,
+      "name": "phase_hover",
+      "scale": 1.0,
+      "mean": 0.26329100131988525,
+      "std": 0.44041895866394043,
+      "meaning": "1 while holding the target height, else 0"
+    },
+    {
+      "index": 13,
+      "name": "phase_descent",
+      "scale": 1.0,
+      "mean": 0.31157776713371277,
+      "std": 0.46313828229904175,
+      "meaning": "1 during the descent (rocket: unpowered fall; electric vehicle: controlled descent), else 0"
+    },
+    {
+      "index": 14,
+      "name": "phase_landing",
+      "scale": 1.0,
+      "mean": 0.058751754462718964,
+      "std": 0.2351595163345337,
+      "meaning": "1 during the final slow descent to touchdown, else 0"
+    }
+  ],
+  "outputs": [
+    {
+      "index": 0,
+      "name": "gimbal",
+      "range": [
+        -1,
+        1
+      ],
+      "meaning": "this plane's gimbal correction added to the PID's = output x 4.0 deg"
+    },
+    {
+      "index": 1,
+      "name": "throttle_vote",
+      "range": [
+        -1,
+        1
+      ],
+      "meaning": "throttle correction added to the PID's = mean of the two planes' votes x 0.4"
+    }
+  ],
+  "vehicle": "electric_hopper",
+  "mission": "hop_50m",
+  "control_rate_hz": 50.0,
+  "action_delay_steps": 1,
+  "controllers": {
+    "steering": "policy",
+    "throttle": "policy",
+    "mode": "residual"
+  },
+  "hover_throttle_nominal": 0.5625920263157894,
+  "max_gimbal_deg": 10.0,
+  "firmware": {
+    "headers": [
+      "policy_weights.h",
+      "policy_config.h",
+      "hop_params.h"
+    ],
+    "replay_check": {
+      "steps": 2373,
+      "max_difference": 0.00010391114720453842,
+      "tolerance": 0.001,
+      "passed": true
+    }
+  },
+  "checks": {
+    "samples": 1000,
+    "tolerance": 1e-05,
+    "c_max_difference": 2.9838861081987744e-07,
+    "onnx_max_difference": 2.980232238769531e-07,
+    "passed": true
+  },
+  "training": {
+    "timesteps": 4014080,
+    "requested_timesteps": 4000000,
+    "flights": 1095,
+    "seconds": 3520.2,
+    "recent_landed_rate": 0.98,
+    "training": "hop_residual.yaml"
+  },
+  "evaluation": {
+    "conditions": "20 flights, seeds 100-119, wind up to 4.0 m/s with 1.5 m/s gusts, hidden errors on",
+    "model": {
+      "flights": 20,
+      "success": 18,
+      "landed": 18,
+      "aborted": 0,
+      "max_height": 51.00601580411646,
+      "hover_held": 15.344249999997198,
+      "miss": 3.98404584895516,
+      "touchdown_speed": 1.1965410068509814
+    },
+    "pid": {
+      "flights": 20,
+      "success": 19,
+      "landed": 19,
+      "aborted": 0,
+      "max_height": 50.599616780479934,
+      "hover_held": 15.375999999997173,
+      "miss": 3.1884716815813325,
+      "touchdown_speed": 1.0378788775646168
+    },
+    "table": "controller      mission ok   landed  aborted   max h   hover    miss  v down\nmodel               18/20     18/20      0    51.0    15.3     4.0    1.20\npid                 19/20     19/20      0    50.6    15.4     3.2    1.04\nmax h in m, hover = longest hold inside the altitude band in s, miss = distance from the pad in m"
+  }
+}

@@ -1,0 +1,5 @@
+20 flights, seeds 100-119, wind up to 4.0 m/s with 1.5 m/s gusts, hidden errors on
+controller      mission ok   landed  aborted   max h   hover    miss  v down
+model               18/20     18/20      0    51.0    15.3     4.0    1.20
+pid                 19/20     19/20      0    50.6    15.4     3.2    1.04
+max h in m, hover = longest hold inside the altitude band in s, miss = distance from the pad in m
