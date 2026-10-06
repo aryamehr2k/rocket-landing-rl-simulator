@@ -418,7 +418,11 @@ delta    = kp * error + ki * integral - kd * tilt_rate
 
 Applied to every command, PID or policy, before it reaches the actuators:
 
-- Gimbal commands are clipped to `+-max_angle`.
+- Gimbal commands are clipped to `+-max_angle`, and with `safety.max_gimbal_rate_deg_per_s` set
+  they may move at most that rate between two control steps, measured from the last command
+  that went out (reset to zero with the flight). This applies to the PID and to a policy alike,
+  and the C firmware applies the same limit, so a policy cannot learn a square wave that a servo
+  would not survive.
 - The ascent igniter may only be commanded in `PAD`.
 - The landing igniter may only be commanded in `COAST` or `DESCENT`, at least
   `landing_ignition_lockout_s` after liftoff, with the estimated tilt at most
@@ -475,3 +479,37 @@ that single error, the model is right; the tool prints both.
 array, one `burned_i` entry per motor in the order the rocket YAML lists them (ascent first,
 then landing). Index names live in `physics.py` and nothing else hard-codes the positions.
 The quaternion is renormalised after every integration step.
+
+## Electric vehicle
+
+Everything above applies; these are the additions for `rocketsim/hop/`.
+
+- **Motor**: a motor file with `type: electric` gives thrust `= throttle x max_thrust_n x thrust scale`,
+  throttle in [0, 1]. The thrust follows the throttle command with a first order lag
+  (`spin_up_time_constant_s`, `Throttle` in `actuators.py`). Mass does not change. The motor starts
+  when the flight computer arms it at launch; there is no igniter delay.
+- **Roll**: `Inputs.roll_torque` (N m, right handed about `b_z`) comes from the roll control
+  (`RollActuator`: limited to `max_torque_nm`, first order lag). A spinning fan adds
+  `reaction_torque_nm_per_n x thrust` about the same axis.
+- **GPS** (optional section `gps` of the sensor file): horizontal position and velocity at `rate_hz`,
+  delayed by `lag_s`, with white noise and a slow position drift (first order, 60 s time constant).
+  The estimator averages the pad samples for the origin, then on each sample pulls the horizontal
+  position toward `gps + velocity x lag` by `gps_position_gain` and the horizontal velocity by
+  `gps_velocity_gain`.
+- **Heights**: mission heights are of the landing feet above the pad, the same `height` the
+  estimator reports (`z - pad_cg_height`).
+- **Mission plan** (`Guidance`, once per control step): ascent speed `min(climb_speed, speed + a dt,
+  sqrt(2 a (target - height)))`; at the target, hover for `time_s + extra_time_s`; descent speed
+  ramps to `-descent_speed`; below `final_height_m` it ramps to `-final_speed` and continues to the
+  ground. During the final phase the controller follows only the speed.
+- **Order in one control step**: at the launch time the pad calibration ends and the plan starts;
+  a policy (evaluated outside the flight computer) sees this step's estimate and the previous
+  step's reference; the reference advances; the PID runs; the policy replaces (direct) or adds to
+  (residual) the PID commands; abort checks; clip and rate limit. The C code in `firmware/hop/`
+  does the same.
+- **PID baseline**: lateral position and speed to a tilt command, tilt to gimbal (as for the
+  rocket, `attitude_pid`); reference height error to a speed correction, speed error to an
+  acceleration with an integral, throttle `= hover throttle x (1 + a / g) / max(cos tilt, 0.5)`;
+  roll torque `= -(kp roll + kd roll rate)`.
+- **Abort**: tilt beyond `abort_tilt_deg` or a distance from the pad beyond `geofence_radius_m`
+  cuts the motor for the rest of the flight.
