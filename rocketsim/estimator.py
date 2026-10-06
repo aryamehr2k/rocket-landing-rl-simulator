@@ -14,7 +14,7 @@ import numpy as np
 
 from rocketsim import quaternion
 from rocketsim.guidance_config import EstimatorConfig
-from rocketsim.sensors import BaroSample, ImuSample
+from rocketsim.sensors import BaroSample, GpsSample, ImuSample
 
 F32 = np.float32
 ZERO, HALF, ONE, TWO = F32(0.0), F32(0.5), F32(1.0), F32(2.0)
@@ -88,7 +88,8 @@ def attitude_from_gravity(specific_force: np.ndarray) -> np.ndarray:
 
 class Estimator:
     def __init__(
-        self, config: EstimatorConfig, gravity: float, imu_dt: float, pad_altitude: float, baro_lag: float = 0.0
+        self, config: EstimatorConfig, gravity: float, imu_dt: float, pad_altitude: float, baro_lag: float = 0.0,
+        gps_lag: float = 0.0,
     ) -> None:
         self.dt = F32(imu_dt)
         self.baro_lag = F32(baro_lag)
@@ -96,6 +97,9 @@ class Estimator:
         self.pad_altitude = F32(pad_altitude)
         self.altitude_gain = F32(config.baro_altitude_gain)
         self.velocity_gain = F32(config.baro_velocity_gain)
+        self.gps_position_gain = F32(config.gps_position_gain)
+        self.gps_velocity_gain = F32(config.gps_velocity_gain)
+        self.gps_lag = F32(gps_lag)
         self.pad_samples = max(1, int(round(config.pad_average_time / imu_dt)))
         self.reset()
 
@@ -110,6 +114,8 @@ class Estimator:
         self._gyro_window: deque[np.ndarray] = deque(maxlen=self.pad_samples)
         self._accel_window: deque[np.ndarray] = deque(maxlen=self.pad_samples)
         self._baro_window: deque[np.float32] = deque(maxlen=self.pad_samples)
+        self._gps_window: deque[np.ndarray] = deque(maxlen=self.pad_samples)
+        self.gps_origin = np.zeros(2, dtype=F32)
 
     @property
     def estimate(self) -> Estimate:
@@ -147,6 +153,16 @@ class Estimator:
         self.position[2] = self.position[2] + self.altitude_gain * error
         self.velocity[2] = self.velocity[2] + self.velocity_gain * error
 
+    def update_gps(self, sample: GpsSample) -> None:
+        """Pull the horizontal position and velocity toward one GPS sample, measured from the pad position."""
+        position = sample.position.astype(F32)
+        if not self.in_flight:
+            self._gps_window.append(position)
+            return
+        position_now = position - self.gps_origin + self.velocity[:2] * self.gps_lag
+        self.position[:2] = self.position[:2] + self.gps_position_gain * (position_now - self.position[:2])
+        self.velocity[:2] = self.velocity[:2] + self.gps_velocity_gain * (sample.velocity.astype(F32) - self.velocity[:2])
+
     def liftoff(self) -> None:
         """Freeze the pad calibration and start integrating."""
         if self._gyro_window:
@@ -155,6 +171,8 @@ class Estimator:
             self.q = attitude_from_gravity(np.mean(np.stack(self._accel_window), axis=0))
         if self._baro_window:
             self.baro_offset = F32(np.mean(np.array(self._baro_window, dtype=F32))) - self.pad_altitude
+        if self._gps_window:
+            self.gps_origin = np.mean(np.stack(self._gps_window), axis=0).astype(F32)
         self.position = np.array([ZERO, ZERO, self.pad_altitude], dtype=F32)
         self.velocity = np.zeros(3, dtype=F32)
         self.in_flight = True

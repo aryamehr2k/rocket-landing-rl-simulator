@@ -6,7 +6,7 @@ docs/conventions.md: the IMU reads specific force and angular rate in the body f
 """
 
 from collections import deque
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
@@ -14,6 +14,8 @@ import numpy as np
 from rocketsim.yaml_section import Section, read_yaml_mapping
 
 AXES = 3
+HORIZONTAL = 2
+GPS_DRIFT_TIME_CONSTANT = 60.0  # s, how slowly a GPS position error wanders
 SAMPLE_TIME_TOLERANCE = 1e-9
 
 
@@ -45,18 +47,28 @@ class BarometerConfig:
 
 
 @dataclass(frozen=True)
+class GpsConfig:
+    rate_hz: float
+    lag: float
+    position_noise_std: float
+    position_drift_std: float
+    velocity_noise_std: float
+
+
+@dataclass(frozen=True)
 class SensorsConfig:
     name: str
     imu: ImuConfig
     barometer: BarometerConfig
     source: str
+    gps: GpsConfig | None = None
 
 
 def load_sensors_config(path: str | Path) -> SensorsConfig:
     """Load and validate a sensor YAML."""
     data, source = read_yaml_mapping(path)
     root = Section(data, source)
-    root.only_keys("name", "imu", "barometer")
+    root.only_keys("name", "imu", "barometer", "gps")
     imu = root.sub("imu")
     imu.only_keys("rate_hz", "lag_s", "accelerometer", "gyroscope")
     baro = root.sub("barometer")
@@ -76,6 +88,18 @@ def load_sensors_config(path: str | Path) -> SensorsConfig:
             bias_std=baro.number("bias_std_m", minimum=0.0),
         ),
         source=source,
+        gps=_gps(root.sub("gps")) if root.has("gps") else None,
+    )
+
+
+def _gps(section: Section) -> GpsConfig:
+    section.only_keys("rate_hz", "lag_s", "position_noise_std_m", "position_drift_std_m", "velocity_noise_std_mps")
+    return GpsConfig(
+        rate_hz=section.number("rate_hz", above=0.0),
+        lag=section.number("lag_s", minimum=0.0),
+        position_noise_std=section.number("position_noise_std_m", minimum=0.0),
+        position_drift_std=section.number("position_drift_std_m", minimum=0.0),
+        velocity_noise_std=section.number("velocity_noise_std_mps", minimum=0.0),
     )
 
 
@@ -102,12 +126,21 @@ class BaroSample:
 
 
 @dataclass(frozen=True)
+class GpsSample:
+    time: float
+    position: np.ndarray  # horizontal x, y in metres, relative to the pad on average
+    velocity: np.ndarray
+
+
+@dataclass(frozen=True)
 class Truth:
     """What the sensors would read without any error, recorded once per physics step."""
 
     specific_force: np.ndarray
     angular_rate: np.ndarray
     altitude: float
+    horizontal_position: np.ndarray = field(default_factory=lambda: np.zeros(HORIZONTAL))
+    horizontal_velocity: np.ndarray = field(default_factory=lambda: np.zeros(HORIZONTAL))
 
 
 class SensorSuite:
@@ -119,7 +152,9 @@ class SensorSuite:
         self.rng = rng
         self.imu_lag_steps = int(round(config.imu.lag / dt))
         self.baro_lag_steps = int(round(config.barometer.lag / dt))
-        self.history: deque[Truth] = deque(maxlen=max(self.imu_lag_steps, self.baro_lag_steps) + 1)
+        self.gps_lag_steps = int(round(config.gps.lag / dt)) if config.gps is not None else 0
+        longest = max(self.imu_lag_steps, self.baro_lag_steps, self.gps_lag_steps)
+        self.history: deque[Truth] = deque(maxlen=longest + 1)
         self.reset()
 
     def reset(self) -> None:
@@ -131,8 +166,13 @@ class SensorSuite:
         self.history.clear()
         self.imu_samples = 0
         self.baro_samples = 0
+        self.gps_samples = 0
+        self.gps_drift = np.zeros(HORIZONTAL)
+        if self.config.gps is not None:
+            self.gps_drift = self.rng.normal(0.0, self.config.gps.position_drift_std, HORIZONTAL)
         self.last_imu: ImuSample | None = None
         self.last_baro: BaroSample | None = None
+        self.last_gps: GpsSample | None = None
 
     def record(self, truth: Truth) -> None:
         self.history.append(truth)
@@ -161,3 +201,20 @@ class SensorSuite:
     def _baro_sample(self, t: float, truth: Truth) -> BaroSample:
         noise = float(self.rng.normal(0.0, self.config.barometer.noise_std))
         return BaroSample(t, truth.altitude + self.baro_bias + noise)
+
+    def sample_gps(self, t: float) -> GpsSample | None:
+        """The GPS sample due at time t, if the sensor file has a GPS and one is due."""
+        gps = self.config.gps
+        if gps is None or t + SAMPLE_TIME_TOLERANCE < self.gps_samples / gps.rate_hz:
+            return None
+        self.gps_samples += 1
+        truth = self._delayed(self.gps_lag_steps)
+        # The position error wanders slowly (first order Gauss-Markov) on top of white noise.
+        sample_dt = 1.0 / gps.rate_hz
+        decay = sample_dt / GPS_DRIFT_TIME_CONSTANT
+        kick = gps.position_drift_std * np.sqrt(2.0 * decay) * self.rng.standard_normal(HORIZONTAL)
+        self.gps_drift = self.gps_drift * (1.0 - decay) + kick
+        position = truth.horizontal_position + self.gps_drift + self.rng.normal(0.0, gps.position_noise_std, HORIZONTAL)
+        velocity = truth.horizontal_velocity + self.rng.normal(0.0, gps.velocity_noise_std, HORIZONTAL)
+        self.last_gps = GpsSample(t, position, velocity)
+        return self.last_gps

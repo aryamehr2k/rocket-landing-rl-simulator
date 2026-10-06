@@ -1,0 +1,103 @@
+# Electric test vehicle: one ducted fan with thrust vectoring, electric roll control, four legs.
+# Every number is a stand-in until the measured values from the hardware team are entered.
+# Positions are stations from the nose tip toward the tail, as for the rocket (docs/conventions.md).
+
+name: electric_hopper
+
+airframe:
+  dry_mass_g: 1800.0             # everything except the fan unit, battery included
+  dry_cg_from_nose_mm: 380.0     # balance point without the fan unit
+  dry_pitch_inertia_kgm2: 0.060
+  dry_roll_inertia_kgm2: 0.004
+  length_mm: 700.0
+  reference_diameter_mm: 110.0
+
+aero:
+  drag_coefficient: 0.8
+  normal_force_slope_per_rad: 8.0   # sized for side wind on the whole body while hovering
+  cp_from_nose_mm: 350.0
+
+motor:
+  file: ../motors/example_edf_90mm.yaml
+  position_from_nose_mm: 600.0
+  gimbaled: true                 # thrust vectoring by gimbal or vanes
+
+gimbal:
+  pivot_from_nose_mm: 640.0
+  max_angle_deg: 10.0
+  servo_rate_limit_deg_per_s: 300.0
+  servo_delay_s: 0.020
+  servo_deadband_deg: 0.1
+  servos:
+    pitch:
+      center_us: 1500
+      pulse_us_per_deg: 10.0
+      sign: 1
+      linkage_ratio: 0.5
+      pulse_resolution_us: 1
+      min_us: 1000
+      max_us: 2000
+    yaw:
+      center_us: 1500
+      pulse_us_per_deg: 10.0
+      sign: 1
+      linkage_ratio: 0.5
+      pulse_resolution_us: 1
+      min_us: 1000
+      max_us: 2000
+
+roll_control:                    # electric roll thrusters or a reaction wheel
+  max_torque_nm: 0.15
+  time_constant_s: 0.05
+  kp_nm_per_rad: 0.5
+  kd_nm_s_per_rad: 0.08
+
+legs:
+  span_mm: 350.0
+  height_mm: 120.0
+  count: 4
+  max_touchdown_vertical_speed_mps: 1.5
+  max_touchdown_lateral_speed_mps: 1.0
+  max_touchdown_tilt_deg: 10.0
+
+control:
+  control_rate_hz: 50
+  action_delay_steps: 1
+
+sensors:
+  file: ../sensors/example_imu_gps.yaml   # the GPS keeps the horizontal position; without it the landing drifts
+
+estimator:
+  pad_average_time_s: 1.0
+  baro_altitude_gain: 0.10
+  baro_velocity_gain_per_s: 0.50
+  gps_position_gain: 0.05        # share of each GPS position error applied (10 Hz: about 2 s time constant)
+  gps_velocity_gain: 0.10
+
+controllers:                     # who flies: pid or policy (a trained model, scripts/fly_mission.py --model)
+  steering: policy
+  throttle: policy
+
+attitude_pid:                    # baseline steering, also the fallback when the policy output is invalid
+  attitude:
+    kp: 0.60
+    ki_per_s: 0.0
+    kd_s: 0.12
+    max_integral_deg: 3.0
+  position:
+    kp_deg_per_m: 2.0
+    kd_deg_per_mps: 4.0
+    max_tilt_command_deg: 15.0
+
+altitude_pid:                    # baseline throttle: follows the mission's reference height and speed
+  height_gain_per_s: 1.0
+  max_speed_correction_mps: 2.0
+  speed_gain_per_s: 2.0
+  speed_integral_gain_per_s2: 0.5
+  max_integral_accel_mps2: 2.0
+
+safety:
+  max_gimbal_rate_deg_per_s: 150.0
+  max_throttle_rate_per_s: 2.0
+  abort_tilt_deg: 40.0           # beyond this the motor is cut
+  geofence_radius_m: 40.0        # and beyond this distance from the pad

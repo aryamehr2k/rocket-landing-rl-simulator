@@ -263,3 +263,39 @@ def test_warning_when_the_terminal_speed_is_near_the_table_reach() -> None:
     small = replace(rocket, drag_device=replace(rocket.drag_device, drag_area=0.048))  # terminal speed about 21.6 m/s
     with pytest.warns(UserWarning, match="within"):
         LandingTrigger(small, small.computer.landing_trigger, load_sim_config(EXAMPLE_SIM).environment)
+
+
+def test_safety_rate_limits_the_gimbal_command() -> None:
+    from dataclasses import replace as dc_replace
+
+    from rocketsim.commands import ControlCommand
+    from rocketsim.config import load_rocket_config
+    from rocketsim.safety import Safety
+    from tests.conftest import EXAMPLE_ROCKET
+
+    rocket = load_rocket_config(EXAMPLE_ROCKET)
+    config = dc_replace(rocket.computer.safety, max_gimbal_rate=math.radians(100.0))
+    safety = Safety(config, rocket.gimbal, control_dt=0.02)
+    estimate = None
+    big = ControlCommand(gimbal_pitch=math.radians(7.0), gimbal_yaw=-math.radians(7.0))
+    first, _ = safety.filter(big, Phase.LANDING_BURN, 5.0, 0.0, _still_estimate(), 10.0)
+    assert first.gimbal_pitch == pytest.approx(math.radians(2.0))
+    assert first.gimbal_yaw == pytest.approx(-math.radians(2.0))
+    for _ in range(3):
+        last, _ = safety.filter(big, Phase.LANDING_BURN, 5.0, 0.0, _still_estimate(), 10.0)
+    assert last.gimbal_pitch == pytest.approx(math.radians(7.0))
+    safety.reset()
+    again, _ = safety.filter(big, Phase.LANDING_BURN, 5.0, 0.0, _still_estimate(), 10.0)
+    assert again.gimbal_pitch == pytest.approx(math.radians(2.0))
+    unlimited = Safety(dc_replace(config, max_gimbal_rate=None), rocket.gimbal, control_dt=0.02)
+    free, _ = unlimited.filter(big, Phase.LANDING_BURN, 5.0, 0.0, _still_estimate(), 10.0)
+    assert free.gimbal_pitch == pytest.approx(math.radians(7.0))
+
+
+def _still_estimate():
+    import numpy as np
+
+    from rocketsim.estimator import Estimate
+    from rocketsim.quaternion import IDENTITY
+
+    return Estimate(np.zeros(3), np.zeros(3), IDENTITY.astype(np.float32), np.zeros(3))

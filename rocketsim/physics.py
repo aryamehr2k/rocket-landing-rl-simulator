@@ -25,6 +25,7 @@ IBURNED = 13
 NUM_RIGID_STATES = 13
 DOWN = np.array([0.0, 0.0, -1.0])
 RK4_WEIGHTS = (1.0, 2.0, 2.0, 1.0)
+ROLL_AXIS = 2
 HALF = 0.5
 
 
@@ -62,6 +63,7 @@ class Inputs:
     gimbal_pitch: float = 0.0
     gimbal_yaw: float = 0.0
     brake_fraction: float = 0.0
+    roll_torque: float = 0.0  # N m about the body axis from roll thrusters or a reaction wheel
     wind: np.ndarray = field(default_factory=lambda: np.zeros(2))
     motors: list[MotorInputs] = field(default_factory=list)
 
@@ -85,6 +87,10 @@ class RocketDynamics:
         self.motor_radii = np.array([motor.spec.diameter * HALF for motor in rocket.motors])
         self.area = rocket.reference_area
         self.device = rocket.drag_device
+        self.propellant_masses = np.array([motor.spec.propellant_mass for motor in rocket.motors])
+        self.full_masses = np.array([motor.spec.total_mass for motor in rocket.motors])
+        self._mass_key: bytes | None = None
+        self._mass = MassProperties(0.0, 0.0, 0.0, 0.0)
 
     def new_inputs(self) -> Inputs:
         return Inputs(motors=[MotorInputs() for _ in self.motors])
@@ -98,9 +104,15 @@ class RocketDynamics:
 
     def mass_properties(self, y: np.ndarray) -> MassProperties:
         """Mass, centre of gravity and inertias from the parts and burned propellant."""
+        key = y[IBURNED:].tobytes()
+        if key != self._mass_key:  # the result only changes when propellant burns
+            self._mass_key, self._mass = key, self._compute_mass_properties(y)
+        return self._mass
+
+    def _compute_mass_properties(self, y: np.ndarray) -> MassProperties:
         airframe = self.rocket.airframe
-        burned = np.clip(y[IBURNED:], 0.0, [m.propellant_mass for m in self.motors])
-        motor_masses = np.array([m.total_mass for m in self.motors]) - burned
+        burned = np.clip(y[IBURNED:], 0.0, self.propellant_masses)
+        motor_masses = self.full_masses - burned
         mass = airframe.dry_mass + float(motor_masses.sum())
         cg = (airframe.dry_mass * airframe.dry_cg + float((motor_masses * self.stations).sum())) / mass
         pitch = airframe.dry_pitch_inertia + airframe.dry_mass * (cg - airframe.dry_cg) ** 2
@@ -114,6 +126,8 @@ class RocketDynamics:
         if command.ignition_time is None:
             return 0.0
         thrust = spec.thrust_at(t - command.ignition_time)
+        if spec.electric:
+            return thrust * min(max(command.throttle, 0.0), 1.0) * command.thrust_scale
         if spec.throttleable:
             if y[IBURNED + index] >= spec.propellant_mass:
                 return 0.0
@@ -144,16 +158,19 @@ class RocketDynamics:
             thrust = self.motor_thrust(i, t, y, inputs)
             if self.gimbaled[i]:
                 force += thrust * direction
-                moment += np.cross(pivot, thrust * direction)
+                moment += quaternion.cross(pivot, thrust * direction)
             else:
                 force += thrust * quaternion.BODY_AXIS
+            # A spinning fan or propeller twists the airframe the other way.
+            moment[ROLL_AXIS] += self.motors[i].reaction_torque_per_n * thrust
             dy[IBURNED + i] = self._mass_flow(i, t, y, inputs)
+        moment[ROLL_AXIS] += inputs.roll_torque
 
         inertia = np.array([props.pitch_inertia, props.pitch_inertia, props.roll_inertia])
         dy[IPOS] = y[IVEL]
         dy[IVEL] = rotation @ force / props.mass + self.environment.gravity * DOWN
         dy[IQ] = quaternion.derivative(q, omega)
-        dy[IW] = (moment - np.cross(omega, inertia * omega)) / inertia
+        dy[IW] = (moment - quaternion.cross(omega, inertia * omega)) / inertia
         return dy
 
     def device_drag(self, y: np.ndarray, inputs: Inputs) -> float:
@@ -170,7 +187,7 @@ class RocketDynamics:
     def _mass_flow(self, index: int, t: float, y: np.ndarray, inputs: Inputs) -> float:
         # Follows the thrust curve; the random thrust scale does not change it.
         spec, command = self.motors[index], inputs.motors[index]
-        if command.ignition_time is None:
+        if command.ignition_time is None or spec.electric:
             return 0.0
         curve_thrust = spec.thrust_at(t - command.ignition_time)
         if spec.throttleable:

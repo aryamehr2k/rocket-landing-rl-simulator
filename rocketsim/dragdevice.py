@@ -11,6 +11,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from rocketsim.quaternion import cross
 from rocketsim.yaml_section import Section
 
 HALF = 0.5
@@ -52,10 +53,10 @@ def device_loads(
     position of the device relative to the centre of gravity, so a turning rocket is damped.
     """
     arm = np.array([0.0, 0.0, cg - device.station])
-    local_wind = airspeed_body + np.cross(omega_body, arm)
+    local_wind = airspeed_body + cross(omega_body, arm)
     speed = float(np.linalg.norm(local_wind))
     force = -HALF * density * device.drag_area * fraction * speed * local_wind
-    return force, np.cross(arm, force)
+    return force, cross(arm, force)
 
 
 def drag_factor(device: DragDeviceConfig | None, fraction: float, density: float) -> float:

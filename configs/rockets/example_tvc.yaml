@@ -1,4 +1,4 @@
-# Example thrust vector controlled rocket, about 1.4 kg on the pad.
+# Example thrust vector controlled rocket, about 1.5 kg on the pad.
 # Every number here is a stand-in. Replace them with values measured from your rocket,
 # OpenRocket, a scale and the real motor files before trusting any result.
 # Positions are stations from the nose tip toward the tail. See docs/conventions.md.
@@ -100,6 +100,11 @@ brake:                            # flight computer rules for the drag device
   retract_descent_speed_mps: 3.0  # shut once the burn has slowed the descent below this, before the tail
   burn_fraction: 1.0              # opening held during the hard part of the burn; the stopping table assumes it
 
+controllers:                      # who steers when a trained policy is plugged in; without one the PID always flies
+  BOOST: pid                      # pid or policy
+  LANDING_BURN: policy
+  landing_ignition: trigger       # trigger (the stopping distance table) or policy
+
 pid:
   attitude:                       # tilt error to gimbal angle, per plane
     kp: 0.60
@@ -115,3 +120,4 @@ safety:
   landing_ignition_lockout_s: 2.5           # after liftoff the landing motor may not be lit
   max_landing_ignition_tilt_deg: 35.0
   max_landing_ignition_height_m: 120.0
+  max_gimbal_rate_deg_per_s: 120.0          # the commanded gimbal may not swing faster than this, whoever commands it

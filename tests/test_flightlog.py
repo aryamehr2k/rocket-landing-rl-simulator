@@ -12,7 +12,7 @@ def test_round_trip_with_missing_columns(tmp_path: Path) -> None:
     with FlightLogWriter(path) as log:
         log.write({"time_s": 0.0, "phase": "PAD", "true_z_m": 0.5})
         log.write({"time_s": 0.005, "phase": "BOOST", "true_z_m": 0.6, "ascent_thrust_n": 30.0})
-    assert len(COLUMNS) == 50
+    assert len(COLUMNS) == 56
     data = read_flight_log(path)
     assert list(data) == list(COLUMNS)
     assert data["time_s"] == pytest.approx([0.0, 0.005])

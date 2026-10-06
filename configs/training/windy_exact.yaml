@@ -1,0 +1,18 @@
+# Same as windy.yaml without the randomize section: no hidden errors, for reproducing the README tables.
+
+simulation:
+  physics_rate_hz: 200
+  max_flight_time_s: 60.0
+  pad_hold_time_s: 2.0
+
+environment:
+  site_elevation_m: 300.0
+  gravity_mps2: 9.80665
+  sea_level_density_kgpm3: 1.225
+  scale_height_m: 8500.0
+
+wind:
+  steady_mps: 4.0
+  steady_direction_deg: 30.0  # direction the wind blows toward, from +x toward +y
+  gust_std_mps: 1.5
+  gust_time_constant_s: 2.0

@@ -12,12 +12,20 @@ Usage: python scripts/fly_scripted.py --sim configs/training/windy.yaml --out ru
 """
 
 import argparse
+from dataclasses import replace
 from pathlib import Path
 
+from evaluate import run_configs
 from plot_flight import DPI, plot_flight_log
 
 from rocketsim.commands import PlaneAction
-from rocketsim.config import load_rocket_config
+from rocketsim.config import RocketConfig, load_rocket_config
+from rocketsim.env import rocket_for_training
+from rocketsim.guidance_config import POLICY, ControllersConfig
+from rocketsim.observation import ObservationBuilder
+from rocketsim.policy import POLICY_FILE, PolicyController, load_policy
+from rocketsim.training_config import load_training_config
+from rocketsim.yaml_section import ConfigError
 from rocketsim.flightlog import read_flight_log
 from rocketsim.simconfig import SimConfig, WindConfig, load_sim_config
 from rocketsim.simulation import Simulation, with_fixed_errors, with_wind
@@ -31,8 +39,13 @@ DEFAULT_SEED = 0
 PERCENT = 100.0
 
 
-def fly(sim: Simulation, args: argparse.Namespace) -> None:
-    """One flight. Open loop hands the flight computer a fixed action every control step."""
+def fly(sim: Simulation, args: argparse.Namespace, controller: PolicyController | None = None) -> None:
+    """One flight: the PID, a trained policy, or open loop with a fixed action every control step."""
+    if controller is not None:
+        controller.reset()
+        while not sim.done:
+            sim.control_step(controller.action(sim.flight_computer, sim.t))
+        return
     if not args.open_loop:
         sim.run()
         return
@@ -40,6 +53,22 @@ def fly(sim: Simulation, args: argparse.Namespace) -> None:
     while not sim.done:
         ignite = args.landing_ignite_at is not None and sim.t >= args.landing_ignite_at
         sim.control_step(PlaneAction(delta_x, delta_y, ignite))
+
+
+def open_loop_rocket(rocket: RocketConfig) -> RocketConfig:
+    """The rocket with every decision handed to the outside action, so a fixed gimbal really applies."""
+    owners = ControllersConfig(boost=POLICY, landing_burn=POLICY, landing_ignition=POLICY)
+    return replace(rocket, computer=replace(rocket.computer, controllers=owners))
+
+
+def load_policy_controller(run: str, rocket: RocketConfig) -> tuple[RocketConfig, PolicyController]:
+    """The trained policy of a run folder and the rocket with the controllers it was trained with."""
+    _, training_path = run_configs(Path(run))
+    training = load_training_config(training_path)
+    policy = load_policy(Path(run) / POLICY_FILE)
+    observer = ObservationBuilder(training.observation, rocket.motor("landing").spec.burn_time)
+    rocket = rocket_for_training(rocket, training)
+    return rocket, PolicyController(policy, observer, rocket.gimbal.max_angle, training.action.ignite_threshold)
 
 
 def describe(touchdown: TouchdownResult | None) -> str:
@@ -89,14 +118,14 @@ def load_world(args: argparse.Namespace) -> tuple[SimConfig, WindConfig]:
 
 def run_episodes(rocket_path: str, args: argparse.Namespace) -> None:
     """Repeat the flight over consecutive seeds and print one line per flight plus the totals."""
-    rocket = load_rocket_config(rocket_path)
+    rocket, controller = load_rocket_and_controller(rocket_path, args)
     sim_config, wind = load_world(args)
     sim = Simulation(rocket, sim_config, seed=args.seed, wind=wind)
     landed = 0
     for episode in range(args.episodes):
         seed = args.seed + episode
         sim.reset(seed=seed)
-        fly(sim, args)
+        fly(sim, args, controller)
         touchdown = sim.flight.touchdown
         landed += bool(touchdown is not None and touchdown.success)
         stop = sim.burn_summary.stop_height
@@ -105,9 +134,19 @@ def run_episodes(rocket_path: str, args: argparse.Namespace) -> None:
     print(f"landed {landed} of {args.episodes} ({PERCENT * landed / args.episodes:.0f} %)")
 
 
+def load_rocket_and_controller(rocket_path: str, args: argparse.Namespace) -> tuple[RocketConfig, PolicyController | None]:
+    rocket = load_rocket_config(rocket_path)
+    if args.policy:
+        return load_policy_controller(args.policy, rocket)
+    if args.open_loop:
+        return open_loop_rocket(rocket), None
+    return rocket, None
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--rocket", default=DEFAULT_ROCKET)
+    parser.add_argument("--policy", help="run folder of a trained policy (scripts/train.py) that steers instead of the PID")
     parser.add_argument("--sim", default=DEFAULT_SIM, help="training YAML with the simulation, environment and wind")
     parser.add_argument("--out", default=DEFAULT_OUT, help="flight log CSV to write (single flight only)")
     parser.add_argument("--seed", type=int, default=DEFAULT_SEED, help="seed for sensor errors, igniter delays and gusts")
@@ -124,13 +163,20 @@ def main() -> None:
     parser.add_argument("--landing-ignite-at", type=float, help="open loop: send the landing igniter command at this time")
     parser.add_argument("--plot", action="store_true", help="also write a PNG next to the CSV")
     args = parser.parse_args()
-    if args.episodes > 1:
-        run_episodes(args.rocket, args)
-        return
-    rocket = load_rocket_config(args.rocket)
-    sim_config, wind = load_world(args)
+    if args.episodes < 1:
+        parser.error("--episodes must be at least 1")
+    if args.policy and args.open_loop:
+        parser.error("--policy and --open-loop cannot be combined")
+    try:
+        if args.episodes > 1:
+            run_episodes(args.rocket, args)
+            return
+        rocket, controller = load_rocket_and_controller(args.rocket, args)
+        sim_config, wind = load_world(args)
+    except (ConfigError, FileNotFoundError) as error:
+        raise SystemExit(str(error)) from error
     sim = Simulation(rocket, sim_config, seed=args.seed, log_path=args.out, wind=wind)
-    fly(sim, args)
+    fly(sim, args, controller)
     sim.close()
     report(sim)
     print(f"wrote {args.out}")

@@ -1,0 +1,12 @@
+# Stand-in electric ducted fan for the electric test vehicle. Not a measured motor.
+# Replace max_thrust_n with a static thrust test of your fan and battery, and spin_up_time_constant_s
+# with the time the thrust takes to reach 63 % of a throttle step.
+name: EXAMPLE_EDF_90MM
+type: electric
+mass_g: 380                    # fan, motor and ESC; the battery belongs to the airframe dry mass
+max_thrust_n: 38.0             # static thrust at full throttle with a charged battery
+spin_up_time_constant_s: 0.10
+max_run_time_s: 120            # battery endurance at hover
+reaction_torque_nm_per_n: 0.003  # roll torque from the spinning fan per newton of thrust
+diameter_mm: 90
+length_mm: 120

@@ -1,0 +1,94 @@
+# Same as default.yaml, but the policy decides when to light the landing motor as well.
+# Simulation environment and training settings.
+# The simulation, environment and wind sections set up the world; randomize adds hidden errors.
+
+simulation:
+  physics_rate_hz: 200
+  max_flight_time_s: 60.0
+  pad_hold_time_s: 2.0        # the flight computer calibrates on the pad, then the launch command goes out
+
+environment:
+  site_elevation_m: 300.0
+  gravity_mps2: 9.80665
+  sea_level_density_kgpm3: 1.225
+  scale_height_m: 8500.0
+
+wind:
+  steady_mps: 0.0
+  steady_direction_deg: 0.0   # direction the wind blows toward, from +x toward +y
+  gust_std_mps: 0.0
+  gust_time_constant_s: 2.0
+
+randomize:                    # hidden per-flight errors, drawn uniformly; the flight computer does not see them
+  landing_thrust_scale: [0.98, 1.02]   # a batch of landing motors within 2 % of the curve in the motor file
+  ascent_thrust_scale: [0.95, 1.05]
+  dry_mass_g: [-12, 12]                # weighing error and small changes between flights
+  device_drag_area_scale: [0.95, 1.05] # how well the petals' drag area is known
+
+# Everything below is for training the landing policy (scripts/train.py).
+
+observation:                  # what the policy sees, each value divided by its scale; same fields for both planes
+  fields:
+    - {name: height, scale: 100.0}            # estimated feet height above the ground, m
+    - {name: vertical_speed, scale: 40.0}     # estimated vertical speed, m/s (negative going down)
+    - {name: lateral_position, scale: 30.0}   # estimated x (pitch plane) or y (yaw plane), m
+    - {name: lateral_speed, scale: 10.0}      # m/s
+    - {name: tilt, scale: 0.5}                # rad, how far the nose leans toward the plane's axis
+    - {name: tilt_rate, scale: 2.0}           # rad/s
+    - {name: gimbal, scale: 0.12}             # last gimbal command for the plane, rad
+    - {name: phase_boost}
+    - {name: phase_coast}
+    - {name: phase_descent}
+    - {name: phase_burn}
+    - {name: burn_progress}                   # 0 before the landing igniter command, 1 at burnout
+    - {name: trigger_ignite}                  # 1 when the stopping distance table says light the motor now
+
+action:
+  ignite_threshold: 0.0       # the policy's ignite output above this sends the landing igniter command
+
+rewards:                      # weights; negative is a penalty
+  touchdown_vertical_speed: -3.0     # per m/s down at touchdown
+  touchdown_lateral_speed: -4.0      # per m/s sideways in the plane at touchdown
+  touchdown_tilt_deg: -0.4           # per degree of tilt at touchdown
+  miss_distance: -0.15               # per metre from the pad in the plane
+  crash: -40.0                       # a touchdown outside the leg limits
+  landed: 40.0                       # a touchdown inside them
+  timeout: -40.0                     # the flight never reached the ground
+  tilt_step: -0.05                   # per radian, every control step while a motor burns
+  lateral_speed_step: -0.01          # per m/s, every control step while a motor burns
+  lateral_position_step: -0.002      # per metre, every control step while a motor burns
+  gimbal_change_step: -8.0           # per rad^2 of change between one command and the next: no bang-bang steering
+  gimbal_step: -0.1                  # per rad of gimbal held, every control step: use the servos gently
+  propellant_step: 0.0               # per kg burned in a control step
+
+curriculum:                   # training conditions by progress: wind in m/s, noise and hidden errors as factors on the values above
+  stages:
+    - {until: 0.20, wind_mps: 0.0, gust_mps: 0.0, sensor_noise: 0.2, hidden_errors: 0.0}
+    - {until: 0.50, wind_mps: 3.0, gust_mps: 1.0, sensor_noise: 1.0, hidden_errors: 0.5}
+    - {until: 1.00, wind_mps: 5.0, gust_mps: 1.5, sensor_noise: 1.0, hidden_errors: 1.0}
+
+episode:
+  random_wind_direction: true # a new wind direction every flight, so the policy does not learn one side
+  random_wind_speed: true     # each flight's steady wind is anywhere between calm and the stage's wind_mps
+
+ppo:
+  total_timesteps: 4000000
+  n_sims: 16                  # flights simulated at once; each gives two samples per step (pitch and yaw plane)
+  workers: 8                  # processes the flights are spread over
+  n_steps: 512                # control steps per flight per update
+  batch_size: 2048
+  n_epochs: 10
+  learning_rate: 0.0003
+  gamma: 0.995
+  gae_lambda: 0.95
+  clip_range: 0.2
+  ent_coef: 0.0
+  hidden_layers: [32, 32]     # small enough for the flight computer
+  activation: tanh
+  seed: 0
+  log_std_init: -1.5          # exploration noise at the start, log of the standard deviation in action units (0.22)
+
+controllers:                  # overrides the rocket YAML's controllers section for this training
+  BOOST: pid
+  LANDING_BURN: policy
+  landing_ignition: policy

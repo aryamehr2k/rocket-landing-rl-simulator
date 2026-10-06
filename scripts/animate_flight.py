@@ -13,12 +13,15 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 from matplotlib.animation import FFMpegWriter, FuncAnimation, PillowWriter  # noqa: E402
+from matplotlib.ticker import NullFormatter  # noqa: E402
 
 from rocketsim.config import RocketConfig, load_rocket_config  # noqa: E402
+from rocketsim.hop.vehicle import is_vehicle_file, load_vehicle_config  # noqa: E402
 from rocketsim.flightlog import ESTIMATE_COLUMNS, read_flight_log  # noqa: E402
 from rocketsim.physics import thrust_direction  # noqa: E402
 from rocketsim.quaternion import to_matrix  # noqa: E402
 from rocketsim.units import rad_to_deg  # noqa: E402
+from rocketsim.yaml_section import ConfigError  # noqa: E402
 
 ROCKET_COLOR = "#2a78d6"
 PLUME_COLOR = "#eb6834"
@@ -37,6 +40,7 @@ FOLLOW_BOX_M = 6.0
 PLUME_M_PER_N = 0.02
 PLUME_MAX_M = 2.0
 VIEW_MARGIN_M = 1.0
+TALL_VIEW_RATIO = 8.0  # above this height to width ratio the x and y axes are too short for any text
 GRID_LINES = 11
 GRID_WIDTH = 0.6
 TRAIL_WIDTH = 0.8
@@ -116,7 +120,8 @@ class FlightScene:
         self.velocity = np.column_stack([log[f"{prefix}_v{axis}_mps"] for axis in "xyz"])
         self.quaternion = np.column_stack([log[f"{prefix}_q{part}"] for part in "wxyz"])
         self.gimbal = np.column_stack([gimbal_angles(log, "pitch"), gimbal_angles(log, "yaw")])
-        self.thrust = np.nan_to_num(log["ascent_thrust_n"]) + np.nan_to_num(log["landing_thrust_n"])
+        thrust_columns = [name for name in ("ascent_thrust_n", "landing_thrust_n", "main_thrust_n") if name in log]
+        self.thrust = sum(np.nan_to_num(log[name]) for name in thrust_columns)
         self.figure = plt.figure(figsize=FIGURE_SIZE)
         self.axes = self.figure.add_subplot(projection="3d")
         self.axes.view_init(elev=elev, azim=azim)
@@ -127,6 +132,7 @@ class FlightScene:
         else:
             self._set_limits(low, high)
             self.axes.set_box_aspect(tuple(high - low))
+            self._hide_cramped_axis_text(high - low)
         plot = self.axes.plot
         self.trail, = plot([], [], [], color=ROCKET_COLOR, linewidth=TRAIL_WIDTH)
         self.body, = plot([], [], [], color=ROCKET_COLOR, linewidth=BODY_WIDTH, solid_capstyle="round")
@@ -156,6 +162,13 @@ class FlightScene:
         for axis, label in zip((self.axes.xaxis, self.axes.yaxis, self.axes.zaxis), ("x (m)", "y (m)", "z (m)")):
             axis.set_pane_color((1.0, 1.0, 1.0, 0.0))
             axis.set_label_text(label)
+
+    def _hide_cramped_axis_text(self, extent: np.ndarray) -> None:
+        """A tall, thin flight squeezes the x and y axes into a few pixels, where numbers and names only overlap."""
+        if extent[2] > TALL_VIEW_RATIO * max(extent[0], extent[1]):
+            for axis in (self.axes.xaxis, self.axes.yaxis):
+                axis.set_major_formatter(NullFormatter())
+                axis.set_label_text("")
 
     def _set_limits(self, low: np.ndarray, high: np.ndarray) -> None:
         self.axes.set_xlim(low[0], high[0])
@@ -213,7 +226,7 @@ def make_writer(fmt: str, fps: int) -> PillowWriter | FFMpegWriter:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("log", help="flight log CSV")
-    parser.add_argument("--rocket", default=DEFAULT_ROCKET, help="rocket YAML that gives the drawn geometry")
+    parser.add_argument("--rocket", default=DEFAULT_ROCKET, help="rocket or vehicle YAML that gives the drawn geometry")
     parser.add_argument("--out", help="GIF or MP4 to write; defaults to the CSV name with .gif")
     parser.add_argument("--fps", type=int, default=DEFAULT_FPS, help="output frames per second")
     parser.add_argument("--speed", type=float, default=DEFAULT_SPEED, help="playback speed factor, 2 is twice real time")
@@ -229,12 +242,17 @@ def main() -> None:
     if fmt not in FORMATS:
         parser.error(f"cannot tell the output format from {out.name}; pass --format gif or mp4")
     writer = make_writer(fmt, args.fps)
-    log = read_flight_log(log_path)
-    rocket = load_rocket_config(args.rocket)
-    scene = FlightScene(log, rocket, state_prefix(log, args.estimated), args.follow, args.elev, args.azim)
-    frames = frame_indices(log["time_s"], args.fps, args.speed)
-    animation = FuncAnimation(scene.figure, scene.draw, frames=frames, blit=False, repeat=False)
-    animation.save(out, writer=writer, dpi=DPI)
+    try:
+        log = read_flight_log(log_path)
+        rocket = load_vehicle_config(args.rocket).body if is_vehicle_file(args.rocket) else load_rocket_config(args.rocket)
+        scene = FlightScene(log, rocket, state_prefix(log, args.estimated), args.follow, args.elev, args.azim)
+        frames = frame_indices(log["time_s"], args.fps, args.speed)
+        animation = FuncAnimation(scene.figure, scene.draw, frames=frames, blit=False, repeat=False)
+        animation.save(out, writer=writer, dpi=DPI)
+    except FileNotFoundError as error:
+        raise SystemExit(f"{error.filename}: {error.strerror}")
+    except ConfigError as error:
+        raise SystemExit(f"{error}")
     print(f"wrote {out}")
 
 

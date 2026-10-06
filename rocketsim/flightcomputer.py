@@ -5,10 +5,13 @@ may hand in a PlaneAction instead of letting the PID and the trigger decide; pha
 still apply to it. See docs/conventions.md.
 """
 
+import math
+
 from rocketsim.commands import ControlCommand, PlaneAction
 from rocketsim.config import RocketConfig
 from rocketsim.dragdevice import FULLY_OPEN, SHUT
 from rocketsim.estimator import Estimate, Estimator
+from rocketsim.guidance_config import POLICY
 from rocketsim.landing_trigger import LandingTrigger
 from rocketsim.phases import CONTROLLED_PHASES, Phase, PhaseMachine
 from rocketsim.pid import TvcController, world_to_servo
@@ -36,8 +39,9 @@ class FlightComputer:
             decision_latency=(rocket.control.action_delay_steps + HALF_STEP) * control_dt,
         )
         self.pid = TvcController(computer.pid)
-        self.safety = Safety(computer.safety, rocket.gimbal, rocket.drag_device, rocket.descent_cg)
+        self.safety = Safety(computer.safety, rocket.gimbal, rocket.drag_device, rocket.descent_cg, control_dt)
         self.brake = computer.brake
+        self.controllers = computer.controllers
         self.reset()
 
     def reset(self) -> None:
@@ -45,6 +49,7 @@ class FlightComputer:
         self.phases.reset()
         self.pid.reset()
         self.trigger.reset()
+        self.safety.reset()
         self.specific_force_bz = 0.0
         self.launched = False
         self.brake_deployed = False
@@ -52,6 +57,8 @@ class FlightComputer:
         self.brake_retracted = False
         self.refusals: tuple[str, ...] = ()
         self.command = ControlCommand()
+        self.trigger_ignite = False
+        self.policy_fallbacks = 0
 
     @property
     def phase(self) -> Phase:
@@ -82,27 +89,27 @@ class FlightComputer:
         ignite_ascent = phase == Phase.PAD and not self.launched and t >= self.launch_time
         pitch = yaw = 0.0
         if phase in CONTROLLED_PHASES:
-            if action is None:
-                delta_x, delta_y = self.pid.command(estimate, self.control_dt, hold_position=True)
-            else:
-                delta_x, delta_y = action.delta_x, action.delta_y
+            delta_x, delta_y = self.pid.command(estimate, self.control_dt, hold_position=True)
+            if action is not None and self.controllers.steering(phase.value) == POLICY:
+                delta_x = self._policy_or_pid(action.delta_x, delta_x)
+                delta_y = self._policy_or_pid(action.delta_y, delta_y)
             pitch, yaw = world_to_servo(delta_x, delta_y, estimate.roll)
         else:
             self.pid.reset()
         speed_down = -float(estimate.velocity[2])
         brake = self.brake_rule(phase, speed_down)
-        if action is not None and action.brake is not None:
+        if action is not None and action.brake is not None and math.isfinite(action.brake):
             brake = action.brake
         if self.brake_deployed and self.brake_deployed_at is None:
             self.brake_deployed_at = t
-        if action is not None:
+        if phase == Phase.DESCENT and self.brake_fully_open(t):
+            self.trigger.observe_descent(t, speed_down, self.specific_force_bz, estimate.total_tilt)
+        self.trigger_ignite = phase == Phase.DESCENT and self.trigger.should_ignite(
+            self.height, speed_down, self.command.brake_fraction
+        )
+        ignite_landing = self.trigger_ignite
+        if action is not None and action.ignite_landing is not None and self.controllers.landing_ignition == POLICY:
             ignite_landing = action.ignite_landing  # safety decides whether this phase allows it
-        else:
-            if phase == Phase.DESCENT and self.brake_fully_open(t):
-                self.trigger.observe_descent(t, speed_down, self.specific_force_bz, estimate.total_tilt)
-            ignite_landing = phase == Phase.DESCENT and self.trigger.should_ignite(
-                self.height, speed_down, self.command.brake_fraction
-            )
         wanted = ControlCommand(pitch, yaw, ignite_ascent, ignite_landing, brake)
         command, self.refusals = self.safety.filter(wanted, phase, t, self.phases.liftoff_time, estimate, self.height)
         if command.ignite_ascent:
@@ -111,6 +118,15 @@ class FlightComputer:
             self.phases.landing_commanded(t)
         self.command = command
         return command
+
+    def _policy_or_pid(self, wanted: float | None, pid_value: float) -> float:
+        # The policy's gimbal for one plane, or the PID's when the policy gave none or an invalid number.
+        if wanted is None:
+            return pid_value
+        if not math.isfinite(wanted):
+            self.policy_fallbacks += 1
+            return pid_value
+        return float(wanted)
 
     def brake_fully_open(self, t: float) -> bool:
         """True once the device has had its deploy time plus the servo delay since the open command."""

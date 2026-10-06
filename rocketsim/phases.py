@@ -30,6 +30,7 @@ class PhaseMachine:
     def reset(self) -> None:
         self.phase = Phase.PAD
         self.liftoff_time: float | None = None
+        self.landing_command_time: float | None = None
         self.history: list[tuple[float, Phase]] = [(0.0, Phase.PAD)]
 
     def imu_update(self, t: float, specific_force_bz: float) -> bool:
@@ -53,6 +54,7 @@ class PhaseMachine:
 
     def landing_commanded(self, t: float) -> None:
         if self.phase in LANDING_IGNITION_PHASES:
+            self.landing_command_time = t
             self._transition(t, Phase.LANDING_BURN)
 
     def landed(self, t: float) -> None:

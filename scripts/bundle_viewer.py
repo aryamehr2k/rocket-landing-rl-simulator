@@ -44,7 +44,10 @@ def main() -> None:
     args = parser.parse_args()
     log = Path(args.log)
     out = Path(args.out) if args.out else log.with_suffix(".html")
-    out.write_text(bundle(log, Path(args.rocket)))
+    try:
+        out.write_text(bundle(log, Path(args.rocket)))
+    except FileNotFoundError as error:
+        raise SystemExit(f"{error.filename}: {error.strerror}")
     print(f"wrote {out} ({out.stat().st_size / 1024:.0f} kB); open it in any browser")
 
 

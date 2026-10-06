@@ -6,3 +6,4 @@ runs/
 .pytest_cache/
 .*/
 !.github/
+firmware/build/

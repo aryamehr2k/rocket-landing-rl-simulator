@@ -1,0 +1,109 @@
+# Residual variant of hop.yaml. Training the AI that flies the electric test vehicle through the whole mission:
+# launch, climb, hover, descent and landing. Run with: python scripts/train.py --training configs/training/hop.yaml
+
+task: hop
+vehicle: ../vehicles/electric_hopper.yaml
+mission: ../missions/hop_50m.yaml
+
+simulation:
+  physics_rate_hz: 200
+  max_flight_time_s: 120.0
+  pad_hold_time_s: 2.0          # the flight computer calibrates its sensors on the pad, then launches
+
+environment:
+  site_elevation_m: 300.0
+  gravity_mps2: 9.80665
+  sea_level_density_kgpm3: 1.225
+  scale_height_m: 8500.0
+
+wind:                           # used by single test flights; training takes its wind from the curriculum below
+  steady_mps: 0.0
+  steady_direction_deg: 0.0
+  gust_std_mps: 0.0
+  gust_time_constant_s: 2.0
+
+controllers:                    # the AI flies both steering and throttle
+  steering: policy
+  throttle: policy
+  mode: residual                # the AI corrects the PID commands
+
+observation:                    # what the AI sees, from the flight computer's estimate, each value divided by its scale
+  fields:
+    - {name: height_error, scale: 10.0}           # reference height minus estimated height, m
+    - {name: vertical_speed_error, scale: 5.0}    # reference minus estimated vertical speed, m/s
+    - {name: reference_speed, scale: 5.0}         # where the plan is heading, m/s
+    - {name: height, scale: 50.0}
+    - {name: vertical_speed, scale: 10.0}
+    - {name: lateral_position, scale: 10.0}       # x or y from the pad, m
+    - {name: lateral_speed, scale: 5.0}
+    - {name: tilt, scale: 0.5}                    # rad
+    - {name: tilt_rate, scale: 2.0}               # rad/s
+    - {name: gimbal, scale: 0.17}                 # last gimbal command for the plane, rad
+    - {name: throttle, scale: 1.0}                # last throttle command, 0 to 1
+    - {name: phase_ascent}
+    - {name: phase_hover}
+    - {name: phase_descent}
+    - {name: phase_landing}
+
+action:
+  throttle_range: 0.4           # an output of +-1 moves the throttle this far from the hover throttle
+  residual_gimbal_deg: 4.0      # residual mode only: gimbal correction for an output of 1
+
+rewards:                        # negative weights are penalties
+  height_error_step: -0.02      # per m off the reference height, every control step
+  speed_error_step: -0.02       # per m/s off the reference vertical speed
+  lateral_position_step: -0.005 # per m from the pad in this plane
+  lateral_speed_step: -0.01     # per m/s sideways
+  tilt_step: -0.05              # per rad
+  gimbal_change_step: -8.0      # per rad^2 of change between steps: no bang-bang steering
+  throttle_change_step: -2.0    # per unit^2 of throttle change between steps
+  landed: 50.0                  # touchdown inside the leg limits
+  mission_success: 100.0        # every mission criterion met
+  crash: -100.0                 # touchdown outside the leg limits, or an abort
+  timeout: -100.0               # still flying at the time limit
+  touchdown_vertical_speed: -5.0  # per m/s at touchdown
+  miss_distance: -0.5           # per m from the pad in this plane at touchdown
+  outside_radius: -30.0         # touchdown outside the mission's landing radius
+
+hidden_errors:                  # differences between the vehicle file and the real vehicle, drawn per flight
+  thrust_scale: [0.92, 1.08]    # fan thrust, battery state
+  dry_mass_g: [-80, 80]
+
+mission_variation:              # train on many missions so the AI follows whatever the mission file says
+  target_altitude_m: [10, 60]
+  hover_time_s: [3, 12]
+
+curriculum:                     # training conditions by progress: wind in m/s, noise and errors as factors
+  stages:
+    - {until: 0.15, wind_mps: 0.0, gust_mps: 0.0, sensor_noise: 0.3, hidden_errors: 0.0}
+    - {until: 0.45, wind_mps: 3.0, gust_mps: 1.0, sensor_noise: 1.0, hidden_errors: 0.5}
+    - {until: 1.00, wind_mps: 6.0, gust_mps: 1.5, sensor_noise: 1.0, hidden_errors: 1.0}
+
+episode:
+  random_wind_direction: true
+  random_wind_speed: true
+
+ppo:
+  total_timesteps: 4000000
+  n_sims: 16                    # flights simulated at the same time; each gives two samples per step (two planes)
+  workers: 8                    # processes the flights are spread over (at most the CPU cores you can spare)
+  n_steps: 512
+  batch_size: 4096
+  n_epochs: 10
+  learning_rate: 0.0003
+  gamma: 0.99
+  gae_lambda: 0.95
+  clip_range: 0.2
+  ent_coef: 0.0
+  hidden_layers: [64, 64]
+  activation: tanh
+  seed: 0
+  log_std_init: -1.5
+  checkpoint_every: 500000      # save the network so far every this many samples (runs/<run>/policy.npz)
+
+evaluation:                     # after training: fly the model and the PID on the same seeds, save the results
+  flights: 20
+  wind_mps: 4.0
+  gust_mps: 1.5
+  plots: true                   # flight plots of inputs, outputs and the mission reference
+  animation: true               # 3D GIF of one flight

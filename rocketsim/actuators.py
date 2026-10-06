@@ -110,3 +110,47 @@ class Igniter:
             return False
         self.command_time = t
         return inputs.ignite(self.index, t + self.delay)
+
+
+class Throttle:
+    """An electric motor's thrust lags the throttle command: a first order response with the spin-up time constant."""
+
+    def __init__(self, time_constant: float, dt: float) -> None:
+        # With no lag the command applies at once; dt / tau above 1 would overshoot, so it is capped.
+        self.blend = 1.0 if time_constant <= 0.0 else min(1.0, dt / time_constant)
+        self.reset()
+
+    def reset(self) -> None:
+        self.target = 0.0
+        self.level = 0.0
+
+    def command(self, throttle: float) -> float:
+        """Accept a throttle command, clipped to [0, 1]."""
+        self.target = min(max(throttle, 0.0), 1.0)
+        return self.target
+
+    def step(self) -> float:
+        """One physics step toward the command."""
+        self.level += (self.target - self.level) * self.blend
+        return self.level
+
+
+class RollActuator:
+    """Roll thrusters or a reaction wheel: a torque about the body axis, limited and lagged."""
+
+    def __init__(self, max_torque: float, time_constant: float, dt: float) -> None:
+        self.max_torque = max_torque
+        self.blend = 1.0 if time_constant <= 0.0 else min(1.0, dt / time_constant)
+        self.reset()
+
+    def reset(self) -> None:
+        self.target = 0.0
+        self.torque = 0.0
+
+    def command(self, torque: float) -> float:
+        self.target = min(max(torque, -self.max_torque), self.max_torque)
+        return self.target
+
+    def step(self) -> float:
+        self.torque += (self.target - self.torque) * self.blend
+        return self.torque

@@ -29,10 +29,11 @@ from rocketsim.landing_design import (
 from rocketsim.landing_montecarlo import ErrorBudget, draw_errors, nominal_draws, simulate_landings
 from rocketsim.landing_sensitivity import StopModel, single_error_draws, stop_sensitivities
 from rocketsim.landing_trigger import LandingTrigger
-from rocketsim.motors import load_motor
+from rocketsim.motors import MotorFileError, load_motor
 from rocketsim.simconfig import SimConfig, load_sim_config
 from rocketsim.simulation import Simulation
 from rocketsim.units import CM2_PER_M2, MS_PER_S, cm2_to_m2, g_to_kg, kg_to_g
+from rocketsim.yaml_section import ConfigError
 
 DEFAULT_SIM = "configs/training/default.yaml"
 DEFAULT_WINDY = "configs/training/windy.yaml"
@@ -230,7 +231,7 @@ def fly_simulator(rocket: RocketConfig, sim_config: SimConfig, count: int) -> st
             f"{max(speeds):.2f} m/s; stop height {min(stops):.2f} to {max(stops):.2f} m; failures {failures or 'none'}")
 
 
-def main() -> None:
+def design() -> None:
     args = parse_args()
     rocket = load_rocket_config(args.rocket)
     sim_config = load_sim_config(args.sim)
@@ -292,6 +293,13 @@ def main() -> None:
         saved[name] = PER_THOUSAND * (outcome.landed.mean() - full.landed.mean())
     for rank, name in enumerate(sorted(saved, key=saved.get, reverse=True)[:TOP_MEASUREMENTS], start=1):
         print(f"   {rank}. {ERROR_LABELS[name]}: about {saved[name]:.0f} landings in 1000")
+
+
+def main() -> None:
+    try:
+        design()
+    except (ConfigError, MotorFileError) as error:
+        raise SystemExit(f"{error}")
 
 
 if __name__ == "__main__":

@@ -14,6 +14,11 @@ HALF = 0.5
 TILT_RATE_MIN_DENOMINATOR = 1e-12
 
 
+def cross(a: np.ndarray, b: np.ndarray) -> np.ndarray:
+    """Cross product of two 3-vectors; numpy's general np.cross is many times slower for this case."""
+    return np.array([a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]])
+
+
 def normalize(q: np.ndarray) -> np.ndarray:
     return q / np.linalg.norm(q)
 
@@ -93,7 +98,7 @@ def tilt_rates(q: np.ndarray, omega_body: np.ndarray) -> tuple[float, float]:
     """Time derivatives of tilt_x and tilt_y."""
     rotation = to_matrix(q)
     a = rotation[:, 2]
-    a_dot = rotation @ np.cross(omega_body, BODY_AXIS)
+    a_dot = rotation @ cross(omega_body, BODY_AXIS)
     return (
         _plane_rate(a[0], a[2], a_dot[0], a_dot[2]),
         _plane_rate(a[1], a[2], a_dot[1], a_dot[2]),

@@ -29,9 +29,10 @@ ACTUATOR_COLUMNS = (
 )
 WIND_COLUMNS = ("wind_x_mps", "wind_y_mps")
 DEVICE_COLUMNS = ("brake_fraction", "device_drag_n")
+THROTTLE_COLUMNS = ("throttle_cmd", "throttle_act", "main_thrust_n", "roll_torque_nm", "ref_height_m", "ref_vz_mps")
 COLUMNS: tuple[str, ...] = (
     ("time_s", "phase") + SENSOR_COLUMNS + ESTIMATE_COLUMNS + TRUE_COLUMNS + ACTUATOR_COLUMNS + WIND_COLUMNS
-    + DEVICE_COLUMNS
+    + DEVICE_COLUMNS + THROTTLE_COLUMNS
 )
 TEXT_COLUMNS = ("phase",)
 NUMBER_FORMAT = "{:.7g}"

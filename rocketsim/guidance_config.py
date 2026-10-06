@@ -11,7 +11,10 @@ from rocketsim.dragdevice import FULLY_OPEN
 from rocketsim.sensors import SensorsConfig, load_sensors_config
 from rocketsim.yaml_section import ConfigError, Section
 
-SECTION_KEYS = ("sensors", "estimator", "phases", "landing_trigger", "pid", "safety", "brake")
+SECTION_KEYS = ("sensors", "estimator", "phases", "landing_trigger", "pid", "safety", "brake", "controllers")
+PID, POLICY, TRIGGER = "pid", "policy", "trigger"
+STEERING_CHOICES = (PID, POLICY)
+IGNITION_CHOICES = (TRIGGER, POLICY)
 MAX_TILT_DEG = 90.0
 MAX_GAIN_FRACTION = 1.0
 MAX_THRUST_MARGIN = 1.10  # the table may assume a motor up to this much stronger than the curve
@@ -22,6 +25,8 @@ class EstimatorConfig:
     pad_average_time: float
     baro_altitude_gain: float
     baro_velocity_gain: float
+    gps_position_gain: float = 0.0
+    gps_velocity_gain: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -71,6 +76,19 @@ class SafetyConfig:
     landing_ignition_lockout: float
     max_landing_ignition_tilt: float
     max_landing_ignition_height: float
+    max_gimbal_rate: float | None = None  # rad/s the commanded gimbal may change at; None means unlimited
+
+
+@dataclass(frozen=True)
+class ControllersConfig:
+    """Who is in charge in each controlled phase: the PID or an outside policy, and who lights the landing motor."""
+
+    boost: str = PID
+    landing_burn: str = PID
+    landing_ignition: str = TRIGGER
+
+    def steering(self, phase_name: str) -> str:
+        return {"BOOST": self.boost, "LANDING_BURN": self.landing_burn}.get(phase_name, PID)
 
 
 @dataclass(frozen=True)
@@ -82,6 +100,7 @@ class FlightComputerConfig:
     pid: PidConfig
     safety: SafetyConfig
     brake: BrakeConfig | None = None
+    controllers: ControllersConfig = ControllersConfig()
 
 
 def load_flight_computer_config(root: Section, base_dir: Path) -> FlightComputerConfig:
@@ -100,15 +119,32 @@ def load_flight_computer_config(root: Section, base_dir: Path) -> FlightComputer
         pid=_pid(root.sub("pid")),
         safety=_safety(root.sub("safety")),
         brake=_brake(root.sub("brake")) if root.has("brake") else None,
+        controllers=load_controllers(root.sub("controllers")) if root.has("controllers") else ControllersConfig(),
     )
 
 
+def load_controllers(section: Section) -> ControllersConfig:
+    """Read a `controllers` mapping: BOOST and LANDING_BURN are pid or policy, landing_ignition trigger or policy."""
+    section.only_keys("BOOST", "LANDING_BURN", "landing_ignition")
+    boost = section.string("BOOST", default=PID)
+    landing_burn = section.string("LANDING_BURN", default=PID)
+    ignition = section.string("landing_ignition", default=TRIGGER)
+    for key, value, choices in (("BOOST", boost, STEERING_CHOICES), ("LANDING_BURN", landing_burn, STEERING_CHOICES), ("landing_ignition", ignition, IGNITION_CHOICES)):
+        if value not in choices:
+            raise ConfigError(f"{section.where(key)} must be one of {choices}, got {value!r}")
+    return ControllersConfig(boost, landing_burn, ignition)
+
+
 def _estimator(section: Section) -> EstimatorConfig:
-    section.only_keys("pad_average_time_s", "baro_altitude_gain", "baro_velocity_gain_per_s")
+    section.only_keys(
+        "pad_average_time_s", "baro_altitude_gain", "baro_velocity_gain_per_s", "gps_position_gain", "gps_velocity_gain"
+    )
     return EstimatorConfig(
         pad_average_time=section.number("pad_average_time_s", above=0.0),
         baro_altitude_gain=section.number("baro_altitude_gain", minimum=0.0, maximum=MAX_GAIN_FRACTION),
         baro_velocity_gain=section.number("baro_velocity_gain_per_s", minimum=0.0),
+        gps_position_gain=section.number("gps_position_gain", minimum=0.0, maximum=MAX_GAIN_FRACTION, default=0.0),
+        gps_velocity_gain=section.number("gps_velocity_gain", minimum=0.0, maximum=MAX_GAIN_FRACTION, default=0.0),
     )
 
 
@@ -168,9 +204,13 @@ def _pid(section: Section) -> PidConfig:
 
 
 def _safety(section: Section) -> SafetyConfig:
-    section.only_keys("landing_ignition_lockout_s", "max_landing_ignition_tilt_deg", "max_landing_ignition_height_m")
+    section.only_keys(
+        "landing_ignition_lockout_s", "max_landing_ignition_tilt_deg", "max_landing_ignition_height_m",
+        "max_gimbal_rate_deg_per_s",
+    )
     return SafetyConfig(
         landing_ignition_lockout=section.number("landing_ignition_lockout_s", minimum=0.0),
         max_landing_ignition_tilt=section.number("max_landing_ignition_tilt_deg", above=0.0, maximum=MAX_TILT_DEG),
         max_landing_ignition_height=section.number("max_landing_ignition_height_m", above=0.0),
+        max_gimbal_rate=section.number("max_gimbal_rate_deg_per_s", above=0.0) if section.has("max_gimbal_rate_deg_per_s") else None,
     )

@@ -7,6 +7,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from rocketsim.guidance_config import POLICY, ControllersConfig
 from rocketsim.commands import PlaneAction
 from rocketsim.config import RocketConfig, load_rocket_config
 from rocketsim.flightlog import ESTIMATE_COLUMNS, SENSOR_COLUMNS, read_flight_log
@@ -51,6 +52,9 @@ def test_same_seed_gives_the_same_flight(example: tuple[RocketConfig, SimConfig]
 
 def test_open_loop_action_path_and_safety(example: tuple[RocketConfig, SimConfig]) -> None:
     rocket, sim_config = example
+    # Let a policy steer the boost and decide the landing ignition, as the controllers section allows.
+    owners = ControllersConfig(boost=POLICY, landing_burn=POLICY, landing_ignition=POLICY)
+    rocket = replace(rocket, computer=replace(rocket.computer, controllers=owners))
     sim = Simulation(rocket, sim_config, seed=3)
     angle = math.radians(2.0)
     while sim.flight_computer.phase != Phase.BOOST or sim.t < sim_config.simulation.pad_hold_time + 0.6:
@@ -61,7 +65,7 @@ def test_open_loop_action_path_and_safety(example: tuple[RocketConfig, SimConfig
     assert math.isclose(sim.servos[1].angle, -angle, abs_tol=math.radians(0.3))
     while not sim.done:
         sim.control_step(PlaneAction(0.0, 0.0, ignite_landing=False))
-    assert not sim.igniters[1].commanded  # the trigger is off when a policy acts
+    assert not sim.igniters[1].commanded  # the policy owns the ignition and never asked for it
     assert sim.flight.touchdown is not None and not sim.flight.touchdown.success
 
 

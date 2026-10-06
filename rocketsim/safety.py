@@ -20,12 +20,25 @@ class Safety:
         gimbal: GimbalConfig,
         device: DragDeviceConfig | None = None,
         descent_cg: float = 0.0,
+        control_dt: float | None = None,
     ) -> None:
         self.config = config
         self.gimbal = gimbal
         # A device behind the descent centre of gravity tips a falling rocket over, so it may
         # only open once the gimbal has thrust to hold the attitude.
         self.device_behind_cg = device is not None and device.station > descent_cg
+        # The commanded gimbal may move at most this much between two control steps.
+        self.max_step = None if config.max_gimbal_rate is None or control_dt is None else config.max_gimbal_rate * control_dt
+        self.reset()
+
+    def reset(self) -> None:
+        self.last_pitch = 0.0
+        self.last_yaw = 0.0
+
+    def _slew(self, wanted: float, last: float) -> float:
+        if self.max_step is None:
+            return wanted
+        return min(max(wanted, last - self.max_step), last + self.max_step)
 
     def filter(
         self,
@@ -38,8 +51,8 @@ class Safety:
     ) -> tuple[ControlCommand, tuple[str, ...]]:
         """Return the command that may go out and the reasons for anything that was taken out."""
         limit = self.gimbal.max_angle
-        pitch = min(max(command.gimbal_pitch, -limit), limit)
-        yaw = min(max(command.gimbal_yaw, -limit), limit)
+        pitch = self._slew(min(max(command.gimbal_pitch, -limit), limit), self.last_pitch)
+        yaw = self._slew(min(max(command.gimbal_yaw, -limit), limit), self.last_yaw)
         refused: list[str] = []
         ascent = command.ignite_ascent
         if ascent and phase != Phase.PAD:
@@ -58,6 +71,7 @@ class Safety:
                 refused.append(reason)
         if phase == Phase.ABORT:
             pitch, yaw, ascent, landing, brake = 0.0, 0.0, False, False, SHUT
+        self.last_pitch, self.last_yaw = pitch, yaw
         filtered = replace(
             command, gimbal_pitch=pitch, gimbal_yaw=yaw, ignite_ascent=ascent, ignite_landing=landing,
             brake_fraction=brake,

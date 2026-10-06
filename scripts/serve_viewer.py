@@ -42,6 +42,8 @@ def main() -> None:
     args = parser.parse_args()
     if not Path(args.log).is_file():
         raise SystemExit(f"{args.log} does not exist; fly something first with scripts/fly_scripted.py")
+    if not Path(args.rocket).is_file():
+        raise SystemExit(f"{args.rocket} does not exist; --rocket needs a rocket YAML")
     handler = partial(SimpleHTTPRequestHandler, directory=str(ROOT))
     with ThreadingHTTPServer((args.host, args.port), handler) as server:
         print(f"serving {ROOT} on port {args.port}; press Ctrl+C to stop", flush=True)

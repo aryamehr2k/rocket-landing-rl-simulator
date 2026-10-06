@@ -86,7 +86,7 @@ class RocketConfig:
     gimbal: GimbalConfig
     legs: LegsConfig
     control: ControlConfig
-    computer: FlightComputerConfig
+    computer: FlightComputerConfig | None  # None for a vehicle with its own flight computer (rocketsim/hop)
     source: str
     drag_device: DragDeviceConfig | None = None
 

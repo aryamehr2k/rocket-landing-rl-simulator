@@ -133,8 +133,8 @@ function gimbalAngles(row) {
 }
 
 function totalThrust(row) {
-  const a = row.ascent_thrust_n, l = row.landing_thrust_n;
-  return (Number.isFinite(a) ? a : 0) + (Number.isFinite(l) ? l : 0);
+  return ['ascent_thrust_n', 'landing_thrust_n', 'main_thrust_n']
+    .reduce((sum, key) => sum + (Number.isFinite(row[key]) ? row[key] : 0), 0);
 }
 
 function plumeLength(thrustN) {

@@ -4,6 +4,7 @@ Two formats are read: RASP .eng files as published on ThrustCurve.org and simple
 files with time and thrust pairs. See docs/conventions.md for the ignition semantics.
 """
 
+import math
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -16,6 +17,7 @@ ENG_COMMENT_PREFIX = ";"
 ENG_HEADER_FIELDS = 7
 ENG_NAME, ENG_DIAMETER_MM, ENG_LENGTH_MM, ENG_PROPELLANT_KG, ENG_TOTAL_KG = 0, 1, 2, 4, 5
 ENG_SUFFIXES = (".eng",)
+SOLID, ELECTRIC = "solid", "electric"
 YAML_SUFFIXES = (".yaml", ".yml")
 
 
@@ -39,6 +41,8 @@ class MotorSpec:
     ignition_delay_mean: float | None = None
     ignition_delay_spread: float | None = None
     source: str = ""
+    electric: bool = False
+    reaction_torque_per_n: float = 0.0
     cumulative_impulse: np.ndarray = field(default_factory=lambda: np.zeros(0), repr=False)
 
     def __post_init__(self) -> None:
@@ -61,8 +65,14 @@ class MotorSpec:
 
     @property
     def exhaust_velocity(self) -> float:
-        """Effective exhaust velocity: total impulse per kilogram of propellant."""
+        """Effective exhaust velocity: total impulse per kilogram of propellant (infinite for an electric motor)."""
+        if self.propellant_mass <= 0.0:
+            return math.inf
         return self.total_impulse / self.propellant_mass
+
+    @property
+    def max_thrust(self) -> float:
+        return float(self.thrusts.max())
 
     def thrust_at(self, time_since_ignition: float) -> float:
         """Thrust from the curve, zero before ignition and after burnout."""
@@ -148,10 +158,12 @@ def _motor_from_eng(header: list[str], points: list[tuple[float, float]], source
 
 
 def parse_motor_yaml(text: str, source: str = "<yaml>") -> MotorSpec:
-    """Parse a YAML motor description with a `thrust_curve` list of [time_s, thrust_n] pairs."""
+    """Parse a YAML motor: a solid motor with a `thrust_curve`, or `type: electric` with a maximum thrust."""
     data = yaml.safe_load(text)
     if not isinstance(data, dict):
         raise MotorFileError(f"{source}: motor YAML must be a mapping")
+    if data.get("type", SOLID) == ELECTRIC:
+        return _electric_motor(data, source)
     for key in ("name", "propellant_mass_g", "total_mass_g", "thrust_curve"):
         if key not in data:
             raise MotorFileError(f"{source}: missing required key {key!r}")
@@ -177,6 +189,44 @@ def parse_motor_yaml(text: str, source: str = "<yaml>") -> MotorSpec:
             ignition_delay_spread=delay_spread,
             source=source,
         )
+    )
+
+
+def _electric_motor(data: dict, source: str) -> MotorSpec:
+    """An electric fan or propeller: thrust = throttle x max_thrust_n, first order spin-up, no mass change."""
+    allowed = {"name", "type", "mass_g", "max_thrust_n", "spin_up_time_constant_s", "max_run_time_s",
+               "reaction_torque_nm_per_n", "diameter_mm", "length_mm"}
+    unknown = sorted(set(data) - allowed)
+    if unknown:
+        raise MotorFileError(f"{source}: unknown key {unknown[0]!r} for an electric motor; expected one of {sorted(allowed)}")
+    for key in ("name", "mass_g", "max_thrust_n", "spin_up_time_constant_s", "max_run_time_s"):
+        if key not in data:
+            raise MotorFileError(f"{source}: missing required key {key!r}")
+    max_thrust = float(data["max_thrust_n"])
+    run_time = float(data["max_run_time_s"])
+    if max_thrust <= 0.0 or run_time <= 0.0:
+        raise MotorFileError(f"{source}: max_thrust_n and max_run_time_s must be positive")
+    spin_up = float(data["spin_up_time_constant_s"])
+    if spin_up < 0.0:
+        raise MotorFileError(f"{source}: spin_up_time_constant_s must not be negative")
+    mass = to_si("mass_g", float(data["mass_g"]))
+    if mass <= 0.0:
+        raise MotorFileError(f"{source}: mass_g must be positive")
+    return MotorSpec(
+        name=str(data["name"]),
+        propellant_mass=0.0,
+        total_mass=mass,
+        times=np.array([0.0, run_time]),
+        thrusts=np.array([max_thrust, max_thrust]),
+        diameter=to_si("diameter_mm", float(data.get("diameter_mm", 0.0))),
+        length=to_si("length_mm", float(data.get("length_mm", 0.0))),
+        throttleable=True,
+        throttle_lag=spin_up,
+        ignition_delay_mean=0.0,
+        ignition_delay_spread=0.0,
+        source=source,
+        electric=True,
+        reaction_torque_per_n=float(data.get("reaction_torque_nm_per_n", 0.0)),
     )
 
 

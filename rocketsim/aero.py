@@ -9,6 +9,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from rocketsim.config import AeroConfig
+from rocketsim.quaternion import cross
 from rocketsim.simconfig import EnvironmentConfig, WindConfig
 
 LATERAL = np.array([1.0, 1.0, 0.0])
@@ -37,7 +38,7 @@ def aerodynamic_loads(
     drag = -factor * aero.drag_coefficient * airspeed_body
     normal = -factor * aero.normal_force_slope * airspeed_body * LATERAL
     cp_position = np.array([0.0, 0.0, cg - aero.cp])
-    return AeroLoads(force=drag + normal, moment=np.cross(cp_position, normal))
+    return AeroLoads(force=drag + normal, moment=cross(cp_position, normal))
 
 
 class Wind:

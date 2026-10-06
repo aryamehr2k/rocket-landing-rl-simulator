@@ -81,8 +81,11 @@ def main() -> None:
     args = parser.parse_args()
     log_path = Path(args.log)
     out = Path(args.out) if args.out else log_path.with_suffix(".png")
-    fig = plot_flight_log(read_flight_log(log_path), log_path.stem)
-    fig.savefig(out, dpi=DPI)
+    try:
+        fig = plot_flight_log(read_flight_log(log_path), log_path.stem)
+        fig.savefig(out, dpi=DPI)
+    except FileNotFoundError as error:
+        raise SystemExit(f"{error.filename}: {error.strerror}")
     print(f"wrote {out}")
 
 
