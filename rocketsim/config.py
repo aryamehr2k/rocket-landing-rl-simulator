@@ -1,8 +1,4 @@
-"""Rocket configuration: YAML loading, unit conversion and validation.
-
-Values are converted to SI on load using the key suffixes described in
-docs/conventions.md. Every problem raises ConfigError with the file and key path.
-"""
+"""Rocket configuration: YAML loading, conversion to SI and validation (ConfigError names the file and key)."""
 
 import math
 from dataclasses import dataclass

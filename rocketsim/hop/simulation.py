@@ -1,8 +1,6 @@
 """Closed loop of the electric vehicle: sensors, flight computer, servos, throttle, roll control, physics.
 
-Same structure as rocketsim.simulation: one `control_step` runs the flight computer once and
-the physics `steps_per_control` times. `HopErrors` are the per-flight differences between the
-vehicle file and the vehicle that actually flies, which the flight computer does not know.
+As in rocketsim.simulation, one `control_step` runs the flight computer once and the physics several times.
 """
 
 from collections import deque

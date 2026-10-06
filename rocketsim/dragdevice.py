@@ -1,9 +1,6 @@
-"""A deployable drag device: petals or flaps that give the falling rocket a terminal speed.
+"""A deployable drag device: petals or flaps with a drag area Cd*A at one station, opened from 0 (shut) to 1.
 
-The device is an ideal drag area Cd*A at one station, opened by a fraction between 0 (shut)
-and 1 (fully open). Its force follows the relative wind at its own station, so a device ahead
-of the centre of gravity (toward the nose) steadies a tail-first fall like the feathers of a
-shuttlecock, and one behind it tips the rocket over. See docs/conventions.md.
+Placed ahead of the CG it steadies a tail-first fall like shuttlecock feathers; behind the CG it tips the rocket over.
 """
 
 import math

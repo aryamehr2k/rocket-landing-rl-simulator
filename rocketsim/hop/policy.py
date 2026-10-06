@@ -1,10 +1,4 @@
-"""Turning the network's outputs into commands for the electric vehicle, in training and in flight.
-
-Per plane the network gives two numbers in [-1, 1]: the gimbal for that plane and a throttle
-vote. The two votes are averaged. In direct mode the gimbal output is scaled by the gimbal limit
-and the throttle is the hover throttle plus the vote times `throttle_range`; in residual mode
-both are corrections that the flight computer adds to the PID's commands.
-"""
+"""Turning the network's outputs into commands for the electric vehicle, in training and in flight."""
 
 import math
 
@@ -23,7 +17,12 @@ LOW, HIGH = -1.0, 1.0
 
 
 def plane_action(outputs: list[np.ndarray | None], computer: HopFlightComputer, action: HopActionConfig) -> PlaneAction:
-    """The flight computer's action from the two plane outputs; a missing or non-finite output leaves that plane to the PID."""
+    """The flight computer's action from the two plane outputs, each a gimbal and a throttle vote in [-1, 1].
+
+    The votes are averaged. Direct mode scales the gimbal by the gimbal limit and adds the vote times `throttle_range`
+    to the hover throttle; residual mode adds both to the PID's commands. A missing or non-finite output leaves that
+    plane to the PID.
+    """
     residual = computer.controllers.mode == RESIDUAL
     gimbal_scale = action.residual_gimbal if residual else computer.vehicle.body.gimbal.max_angle
     gimbal: list[float | None] = [None, None]

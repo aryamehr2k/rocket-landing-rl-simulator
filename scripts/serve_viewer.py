@@ -1,9 +1,6 @@
-"""Serve the project folder over HTTP and print the viewer link for one flight log.
+"""Serve the project over HTTP and print the viewer link for a flight log; on a remote machine, forward the port.
 
-For a simulator that runs on a remote machine: start this there, let VS Code forward the port
-(it offers to when it sees the link) or run ssh -L 8000:localhost:8000 user@host, then open the
-link on your own computer.
-Usage: python scripts/serve_viewer.py runs/flight.csv --port 8000
+Usage: python scripts/serve_viewer.py runs/flight.csv --port 8000 (then VS Code or ssh -L 8000:localhost:8000)
 """
 
 import argparse

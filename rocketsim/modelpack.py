@@ -1,12 +1,6 @@
-"""Model folders: everything needed to fly or deploy one trained network, in models/<name>/.
+"""Model folders in models/<name>/: everything needed to fly or deploy one trained network.
 
-    policy.npz        the network and its input normalisation (numpy float32), used by the simulator
-    policy.onnx       the same network for any ONNX runtime (input "observation" [1, N], output "action" [1, 2])
-    policy_weights.h  the same network as C arrays for firmware/policy/policy.c
-    model.json        what every input and output means, scales, rates, checks, training and evaluation results
-    configs/          copies of the training, vehicle (or rocket), mission, motor and sensor files it was trained with
-
-A model folder can be flown directly: scripts/fly_mission.py --model models/<name>.
+policy.npz for the simulator, policy.onnx, policy_weights.h for the firmware, model.json and copies of the configs.
 """
 
 import json
@@ -21,7 +15,7 @@ from rocketsim.hop.training import HOP_TASK, load_hop_training_config, training_
 from rocketsim.hop.vehicle import load_vehicle_config
 from rocketsim.observation import DESCRIPTIONS
 from rocketsim.policy import POLICY_FILE, MlpPolicy, load_policy
-from rocketsim.units import rad_to_deg
+from rocketsim.units import STANDARD_GRAVITY, rad_to_deg
 
 MODELS_DIR = Path(__file__).resolve().parent.parent / "models"
 MODEL_FILE = "model.json"
@@ -34,7 +28,10 @@ INDENT = 2
 
 
 def package_model(run: Path, out: Path, evaluation: dict[str, Any] | None = None, seed: int = 0) -> dict[str, Any]:
-    """Write a model folder from a training run folder and return the model.json content."""
+    """Write a model folder from a training run folder and return the model.json content.
+
+    model.json says what every input and output means, with the scales, rates, export checks and results.
+    """
     policy = load_policy(run / POLICY_FILE)
     out.mkdir(parents=True, exist_ok=True)
     if run.resolve() != out.resolve():
@@ -122,7 +119,7 @@ def _hop_contract(training_path: Path) -> dict[str, Any]:
                 if residual else f"throttle = hover throttle / cos(tilt) + mean of the two planes' votes x {training.action.throttle_range}, "
                                  "clipped to 0..1; hover throttle = mass x g / max thrust")},
         ],
-        "hover_throttle_nominal": vehicle.mass * 9.80665 / vehicle.max_thrust,
+        "hover_throttle_nominal": vehicle.mass * STANDARD_GRAVITY / vehicle.max_thrust,
         "max_gimbal_deg": max_gimbal,
     }
 

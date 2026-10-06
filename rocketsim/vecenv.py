@@ -1,30 +1,44 @@
 """The training environment: many flights at once, each contributing its two plane views.
 
-A Stable-Baselines3 VecEnv whose sub-environment 2k is the pitch plane of flight k and 2k+1 its
-yaw plane, so one policy is trained on both planes with twice the samples per flight. Flights
-can be spread over worker processes; the curriculum level is forwarded to all of them.
+Sub-environment 2k is the pitch plane of flight k and 2k+1 its yaw plane, so one policy learns from
+both planes. Flights can be spread over worker processes; the curriculum level reaches all of them.
 """
 
 import multiprocessing as mp
 import os
+import signal
 from multiprocessing.connection import Connection
-from typing import Any, Callable, Sequence
+from typing import Any, Callable, Protocol, Sequence
 
-import gymnasium as gym
 import numpy as np
-from stable_baselines3.common.vec_env import VecEnv
 
 from rocketsim.curriculum import CurriculumLevel
-from rocketsim.env import ACTION_HIGH, ACTION_LOW, ACTION_SIZE, PlaneEpisode
-from rocketsim.observation import PLANES
+from rocketsim.env import ACTION_HIGH, ACTION_LOW, ACTION_SIZE
+from rocketsim.observation import PLANES, ObservationBuilder
 
 PLANES_PER_FLIGHT = len(PLANES)
 PARENT_CHECK_S = 5.0
-# Any episode with the PlaneEpisode interface: rocketsim.env.PlaneEpisode or rocketsim.hop.env.HopEpisode.
-EpisodeFactory = Callable[[int], PlaneEpisode]
+WORKER_EXIT_S = 5.0  # how long close() waits for a worker before terminating it
+PIPE_ERRORS = (EOFError, OSError)  # a worker that already exited: closed pipe, reset connection
+
+
+class Episode(Protocol):
+    """One flight seen as two plane views: rocketsim.env.PlaneEpisode or rocketsim.hop.env.HopEpisode."""
+
+    observer: ObservationBuilder
+
+    def reset(self, seed: int | None = None) -> np.ndarray: ...
+
+    def step(self, actions: list[np.ndarray | None]) -> tuple[np.ndarray, np.ndarray, bool, dict[str, Any]]: ...
+
+    def set_level(self, level: CurriculumLevel) -> None: ...
+
+
+EpisodeFactory = Callable[[int], Episode]
 
 
 def _worker(pipe: Connection, make_episode: EpisodeFactory, indices: Sequence[int]) -> None:
+    signal.signal(signal.SIGINT, signal.SIG_IGN)  # Ctrl+C stops the trainer, which then closes the workers
     episodes = [make_episode(i) for i in indices]
     parent = os.getppid()
     while True:
@@ -37,7 +51,7 @@ def _worker(pipe: Connection, make_episode: EpisodeFactory, indices: Sequence[in
         if command == "reset":
             pipe.send(np.concatenate([e.reset() for e in episodes]))
         elif command == "step":
-            pipe.send([_step_and_reset(e, payload[PLANES_PER_FLIGHT * k : PLANES_PER_FLIGHT * (k + 1)]) for k, e in enumerate(episodes)])
+            pipe.send(_step_flights(episodes, payload))
         elif command == "level":
             for e in episodes:
                 e.set_level(payload)
@@ -47,30 +61,29 @@ def _worker(pipe: Connection, make_episode: EpisodeFactory, indices: Sequence[in
             return
 
 
-def _step_and_reset(episode: PlaneEpisode, actions: np.ndarray) -> tuple[np.ndarray, np.ndarray, bool, dict[str, Any]]:
-    # At the end of a flight the terminal observation is kept in the info and a new flight starts.
-    observations, rewards, done, info = episode.step([actions[0], actions[1]])
-    if done:
-        info = {**info, "terminal_observation": observations}
-        observations = episode.reset()
-    return observations, rewards, done, info
+def _step_flights(episodes: list[Episode], actions: np.ndarray) -> list[tuple[np.ndarray, np.ndarray, bool, dict[str, Any]]]:
+    """Step each flight with its two plane actions; a finished flight starts again at once."""
+    per_flight = actions.reshape(len(episodes), PLANES_PER_FLIGHT, -1)
+    results = []
+    for episode, plane_actions in zip(episodes, per_flight):
+        observations, rewards, done, info = episode.step(list(plane_actions))
+        if done:
+            observations = episode.reset()
+        results.append((observations, rewards, done, info))
+    return results
 
 
-class PlanePairVecEnv(VecEnv):
+class PlanePairVecEnv:
+    """n_sims flights as 2 * n_sims plane environments that reset themselves when a flight ends."""
+
     def __init__(self, make_episode: EpisodeFactory, n_sims: int, workers: int = 1) -> None:
         probe = make_episode(0)
-        size = probe.observer.size
         self.observation_names = probe.observer.names
-        super().__init__(
-            PLANES_PER_FLIGHT * n_sims,
-            gym.spaces.Box(-np.inf, np.inf, shape=(size,), dtype=np.float32),
-            gym.spaces.Box(ACTION_LOW, ACTION_HIGH, shape=(ACTION_SIZE,), dtype=np.float32),
-        )
-        self.render_mode = None
-        self.n_sims = n_sims
-        self.level = CurriculumLevel()
-        self._actions: np.ndarray | None = None
-        self.episodes: list[PlaneEpisode] = []
+        self.observation_size = probe.observer.size
+        self.action_size = ACTION_SIZE
+        self.action_low, self.action_high = ACTION_LOW, ACTION_HIGH
+        self.num_envs = PLANES_PER_FLIGHT * n_sims
+        self.episodes: list[Episode] = []
         self.pipes: list[Connection] = []
         self.processes: list[mp.Process] = []
         self.slices: list[range] = []
@@ -94,32 +107,23 @@ class PlanePairVecEnv(VecEnv):
             pipe.send(("reset", None))
         return np.concatenate([pipe.recv() for pipe in self.pipes])
 
-    def step_async(self, actions: np.ndarray) -> None:
-        self._actions = np.asarray(actions, dtype=np.float32)
-
-    def step_wait(self) -> tuple[np.ndarray, np.ndarray, np.ndarray, list[dict[str, Any]]]:
-        assert self._actions is not None
+    def step(self, actions: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray, list[dict[str, Any]]]:
+        """One control step of every flight. A finished flight restarts; its summary is in the info."""
+        actions = np.asarray(actions, dtype=np.float32)
         if self.episodes:
-            results = [_step_and_reset(e, self._actions[PLANES_PER_FLIGHT * k : PLANES_PER_FLIGHT * (k + 1)]) for k, e in enumerate(self.episodes)]
+            results = _step_flights(self.episodes, actions)
         else:
             for pipe, flights in zip(self.pipes, self.slices):
-                pipe.send(("step", self._actions[PLANES_PER_FLIGHT * flights.start : PLANES_PER_FLIGHT * flights.stop]))
+                pipe.send(("step", actions[PLANES_PER_FLIGHT * flights.start : PLANES_PER_FLIGHT * flights.stop]))
             results = [r for pipe in self.pipes for r in pipe.recv()]
         observations = np.concatenate([r[0] for r in results])
         rewards = np.concatenate([r[1] for r in results]).astype(np.float32)
         dones = np.repeat([r[2] for r in results], PLANES_PER_FLIGHT)
-        infos = [self._plane_info(r[3], plane) for r in results for plane in PLANES]
+        infos = [r[3] for r in results for _ in PLANES]
         return observations, rewards, dones, infos
-
-    @staticmethod
-    def _plane_info(info: dict[str, Any], plane: int) -> dict[str, Any]:
-        if "terminal_observation" in info:
-            return {**info, "terminal_observation": info["terminal_observation"][plane]}
-        return info
 
     def set_level(self, level: CurriculumLevel) -> None:
         """Forward a curriculum level to every flight; it applies from each flight's next reset."""
-        self.level = level
         for e in self.episodes:
             e.set_level(level)
         for pipe in self.pipes:
@@ -128,29 +132,17 @@ class PlanePairVecEnv(VecEnv):
             pipe.recv()
 
     def close(self) -> None:
+        """Stop the workers. Safe after an interrupt or a crashed worker, so it never hides the real error."""
         for pipe in self.pipes:
-            pipe.send(("close", None))
-        for pipe in self.pipes:
-            pipe.recv()
+            try:
+                pipe.send(("close", None))
+                if pipe.poll(WORKER_EXIT_S):
+                    pipe.recv()
+            except PIPE_ERRORS:
+                pass
         for process in self.processes:
-            process.join()
-
-    def get_attr(self, attr_name: str, indices: Any = None) -> list[Any]:
-        return [getattr(self, attr_name, None)] * self._count(indices)
-
-    def set_attr(self, attr_name: str, value: Any, indices: Any = None) -> None:
-        setattr(self, attr_name, value)
-
-    def env_method(self, method_name: str, *method_args: Any, indices: Any = None, **method_kwargs: Any) -> list[Any]:
-        raise NotImplementedError("PlanePairVecEnv has no per-plane methods")
-
-    def env_is_wrapped(self, wrapper_class: type, indices: Any = None) -> list[bool]:
-        return [False] * self._count(indices)
-
-    def seed(self, seed: int | None = None) -> list[int | None]:
-        return [seed] * self.num_envs
-
-    def _count(self, indices: Any) -> int:
-        if indices is None:
-            return self.num_envs
-        return 1 if isinstance(indices, int) else len(indices)
+            process.join(WORKER_EXIT_S)
+            if process.is_alive():
+                process.terminate()
+                process.join()
+        self.pipes, self.processes = [], []

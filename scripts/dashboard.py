@@ -1,10 +1,6 @@
 """Control pad in the browser: fly the vehicle live, fly many flights, watch training, pick models.
 
-Starts a small web server on this machine. On a remote machine, forward the port (VS Code does it
-from the Ports panel) and open the printed address in your own browser.
-
-Usage: python scripts/dashboard.py
-       python scripts/dashboard.py --port 8060 --processes 8
+Usage: python scripts/dashboard.py [--port 8060]; on a remote machine, forward the port (VS Code: Ports panel).
 """
 
 import argparse

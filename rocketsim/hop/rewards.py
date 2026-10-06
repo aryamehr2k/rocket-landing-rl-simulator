@@ -1,16 +1,12 @@
-"""Rewards of the electric vehicle task, per control plane. Weights come from the training YAML.
-
-Step terms charge for being off the mission's reference and for moving the actuators; the end of
-the flight pays for landing, for meeting every mission criterion, and charges for a crash, an
-abort or running out of time. Penalties are negative weights.
-"""
+"""Rewards of the electric vehicle task, per control plane, weighted from the training YAML (penalties negative)."""
 
 import math
 
-from rocketsim.hop.mission import MissionResult
+from rocketsim.hop.mission import HopPhase, MissionResult
 from rocketsim.hop.training import HopRewardConfig
 
 MAX_TRACKING_ERROR = 10.0  # m or m/s; larger errors are charged as this, so one bad moment cannot dominate
+PLANNED_TOUCHDOWN_PHASES = (HopPhase.DESCENT, HopPhase.LANDING)
 
 
 class HopRewardCalculator:
@@ -31,12 +27,18 @@ class HopRewardCalculator:
         reward += c.throttle_change_step * throttle_change ** 2
         return reward
 
-    def terminal(self, result: MissionResult, timed_out: bool, plane_miss: float) -> float:
-        """Paid once at the end of the flight. `plane_miss` is the distance from the pad in this plane."""
+    def terminal(
+        self, result: MissionResult, timed_out: bool, plane_miss: float, touchdown_phase: HopPhase = HopPhase.LANDING,
+    ) -> float:
+        """Paid once at the end of the flight. `plane_miss` is the distance from the pad in this plane.
+
+        A touchdown before the plan's descent counts as a crash however gentle it was, so that dropping
+        back onto the pad never pays better than flying the mission.
+        """
         c = self.config
         if timed_out:
             return c.timeout
-        if result.aborted or not result.landed:
+        if result.aborted or not result.landed or touchdown_phase not in PLANNED_TOUCHDOWN_PHASES:
             reward = c.crash
         else:
             reward = c.landed

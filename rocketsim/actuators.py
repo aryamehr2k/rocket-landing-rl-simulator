@@ -1,8 +1,4 @@
-"""Servo and igniter models between the flight computer and the physics.
-
-A servo applies, in this order: clip to the gimbal limit, deadband on the change of command,
-pulse quantisation, a pure delay, and a rate limit. See docs/conventions.md.
-"""
+"""Servo, brake, igniter, throttle and roll actuator models between the flight computer and the physics."""
 
 from collections import deque
 
@@ -14,7 +10,10 @@ from rocketsim.physics import Inputs
 
 
 class Servo:
-    """One gimbal servo. `command` takes a new angle each control step, `step` moves the horn each physics step."""
+    """One gimbal servo: clip, deadband, pulse quantisation, then a pure delay and a rate limit, in that order.
+
+    `command` takes a new angle each control step, `step` moves the horn each physics step.
+    """
 
     def __init__(self, calibration: ServoCalibration, gimbal: GimbalConfig, dt: float) -> None:
         self.calibration = calibration
@@ -130,7 +129,6 @@ class Throttle:
         return self.target
 
     def step(self) -> float:
-        """One physics step toward the command."""
         self.level += (self.target - self.level) * self.blend
         return self.level
 

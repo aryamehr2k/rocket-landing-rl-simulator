@@ -1,6 +1,5 @@
-"""Write one self-contained HTML file: the viewer with a flight log and the rocket geometry inside.
+"""Write one self-contained HTML file, the viewer with a flight log and the rocket inside, to open in any browser.
 
-Copy or download that file to any computer and open it in a browser; nothing else is needed.
 Usage: python scripts/bundle_viewer.py runs/flight.csv --out runs/flight.html
 """
 

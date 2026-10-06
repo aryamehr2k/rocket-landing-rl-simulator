@@ -1,7 +1,6 @@
 """Training file of the electric vehicle task: which vehicle and mission, what the policy sees and is paid for.
 
-The simulation, environment and wind sections of the same file are read by load_sim_config.
-The vehicle and mission paths are relative to the training file.
+The vehicle and mission paths are relative to the file; load_sim_config reads its simulation sections.
 """
 
 from dataclasses import dataclass, fields

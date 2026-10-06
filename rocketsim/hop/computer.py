@@ -1,8 +1,6 @@
 """Flight computer of the electric vehicle: estimator, guidance, PID baseline, policy hook and safety.
 
-Each control step it updates the reference from the mission, computes the PID commands, lets
-a policy replace steering and/or throttle where the vehicle file says so, and passes the result
-through the safety limits. A non-finite policy output falls back to the PID for that step.
+A policy may replace steering and/or throttle where the vehicle file says so; a non-finite output falls back to the PID.
 """
 
 import math
@@ -105,7 +103,8 @@ class HopFlightComputer:
         """Launch when the time has come: end the pad calibration and start the mission plan.
 
         Called before anything reads the estimate for the step at time t, so a policy and the PID
-        see the same estimate and plan on the launch step."""
+        see the same estimate and plan on the launch step.
+        """
         if not self.launched and t + TIME_TOLERANCE >= self.launch_time:
             self.launched = True
             self.estimator.liftoff()

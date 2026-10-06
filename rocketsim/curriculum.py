@@ -1,11 +1,4 @@
-"""Curriculum: how much wind, sensor noise and hidden error the policy trains with as training goes on.
-
-A stage names the training wind outright (the strongest steady wind of a flight and the gust
-standard deviation, both in m/s) and scales the sensor noise and bias and the hidden error
-ranges about their centre. Progress 0 is the start of training, 1 the end; the stage whose
-`until` is the first at or above the progress applies. Without a curriculum the flights use
-the YAML's own wind section and full noise and errors.
-"""
+"""Curriculum: how much wind, sensor noise and hidden error the policy trains with as training goes on."""
 
 from dataclasses import dataclass, replace
 
@@ -28,6 +21,8 @@ class CurriculumLevel:
 
 @dataclass(frozen=True)
 class CurriculumStage:
+    """A level that applies up to `until`, a fraction of training (0 at the start, 1 at the end)."""
+
     until: float
     level: CurriculumLevel
 

@@ -1,8 +1,6 @@
 """What the policy sees: named fields from the flight computer's estimate, each divided by a scale.
 
-The training YAML lists the fields by name, so changing what the policy sees is a YAML edit.
-A field is the same quantity for the pitch plane (x) and the yaw plane (y); the policy runs
-once per plane. See docs/conventions.md.
+The training YAML lists the fields by name; each means the same for the pitch plane (x) and the yaw plane (y).
 """
 
 from dataclasses import dataclass

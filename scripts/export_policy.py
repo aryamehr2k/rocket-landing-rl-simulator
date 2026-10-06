@@ -1,11 +1,5 @@
 """Turn a training run into a model folder in models/, ready to fly in the simulator or put on the board.
 
-Writes models/<name>/ with policy.npz, policy.onnx, policy_weights.h (C arrays), model.json (what every
-input and output means) and copies of the configs, after checking the C and ONNX versions against
-Python on a thousand random inputs. --evaluate also flies the model and the PID on the same seeds
-(electric vehicle runs) and stores the comparison in models/<name>/evaluation/. --install copies the
-C header into firmware/policy/ so the firmware build uses this model.
-
 Usage: python scripts/export_policy.py runs/<run> [--name hop_v1] [--evaluate] [--install]
 """
 
@@ -39,7 +33,11 @@ def export(run: Path, out: Path, samples: int, seed: int) -> tuple[float, float]
 
 
 def publish(run: Path, name: str, evaluate: bool, install: bool, models: Path = MODELS_DIR) -> Path:
-    """Package a run as models/<name>, optionally evaluate it and install it into the firmware."""
+    """Package a run as models/<name>, optionally evaluate it and install it into the firmware.
+
+    The C and ONNX versions are checked against Python first. The evaluation (electric vehicle runs only) flies the
+    model and the PID on the same seeds into models/<name>/evaluation/.
+    """
     out = models / name
     description = package_model(run, out)
     if evaluate and description["task"] == HOP_TASK:

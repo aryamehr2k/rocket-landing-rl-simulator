@@ -1,15 +1,15 @@
-"""What happened in the landing burn, in the numbers that explain a touchdown speed.
-
-The stop height is where the hard part of the burn first brought the descent below the target
-speed; the tail then has to sink the rocket from there. Stopping too low means residual speed,
-stopping too high means a climb on leftover thrust or a long slow sink the tail may not finish.
-"""
+"""What happened in the landing burn, in the numbers that explain a touchdown speed."""
 
 from dataclasses import dataclass
 
 
 @dataclass(frozen=True)
 class BurnSummary:
+    """`stop_height` is where the hard part of the burn first brought the descent below the target speed.
+
+    Stopping too low leaves residual speed; stopping too high means a climb on leftover thrust.
+    """
+
     command_time: float | None
     thrust_start_time: float | None
     height_estimate_error: float | None

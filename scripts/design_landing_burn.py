@@ -1,15 +1,6 @@
 """Design the drag brake and the solid landing burn for a rocket, and estimate the landing rate.
 
-The rocket falls at terminal speed once the brake is open, so the landing motor's hard part can
-be sized for one arrival speed. This tool prints, with how each number was computed: the brake
-area for a wanted terminal speed, the speed profile, the hard part and tail of the motor, the
-trigger numbers, the sensitivity of the stop point to every error, the window of motor strength
-that still lands, a one dimensional Monte Carlo landing rate, optionally real simulator flights,
-and which three things to measure first.
-
 Usage: python scripts/design_landing_burn.py --rocket configs/rockets/example_tvc.yaml --terminal-speed 20
-A rocket without a drag_device section needs --terminal-speed (size a brake) or --drag-area-cm2
-(0 checks the free fall as it is).
 """
 
 import argparse

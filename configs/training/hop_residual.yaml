@@ -85,9 +85,9 @@ episode:
 
 ppo:
   total_timesteps: 4000000
-  n_sims: 16                    # flights simulated at the same time; each gives two samples per step (two planes)
-  workers: 8                    # processes the flights are spread over (at most the CPU cores you can spare)
-  n_steps: 512
+  n_sims: 32                    # flights simulated at the same time; each gives two samples per step (two planes)
+  workers: 16                   # processes the flights are spread over (at most the CPU cores you can spare)
+  n_steps: 256                  # steps per flight per update; n_sims x n_steps x 2 samples per update
   batch_size: 4096
   n_epochs: 10
   learning_rate: 0.0003

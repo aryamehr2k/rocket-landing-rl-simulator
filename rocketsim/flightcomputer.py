@@ -1,8 +1,6 @@
 """Everything that will run on the board: estimator, phases, landing trigger, PID and safety.
 
-The simulation feeds it sensor samples and asks for a command once per control step. A policy
-may hand in a PlaneAction instead of letting the PID and the trigger decide; phases and safety
-still apply to it. See docs/conventions.md.
+A policy may hand in a PlaneAction instead of letting the PID and the trigger decide; phases and safety still apply.
 """
 
 import math

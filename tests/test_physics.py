@@ -16,16 +16,13 @@ def test_mass_properties_by_hand(rocket: RocketConfig, environment: EnvironmentC
     dynamics = RocketDynamics(rocket, environment)
     y = dynamics.initial_state()
     props = dynamics.mass_properties(y)
-    # mass = 1.0 + 0.2 + 0.1; cg = (1.0*0.5 + 0.2*0.9 + 0.1*0.8) / 1.3 = 0.76 / 1.3
     assert props.mass == pytest.approx(1.3)
-    cg = 0.76 / 1.3
+    cg = 0.76 / 1.3  # (1.0*0.5 + 0.2*0.9 + 0.1*0.8) / (1.0 + 0.2 + 0.1)
     assert props.cg == pytest.approx(cg)
     expected = 0.1 + 1.0 * (cg - 0.5) ** 2 + 0.2 * (cg - 0.9) ** 2 + 0.1 * (cg - 0.8) ** 2
     assert props.pitch_inertia == pytest.approx(expected)
-    # Test motors have no diameter, so roll inertia is the dry value.
-    assert props.roll_inertia == pytest.approx(0.002)
-    # Feet plane at 1.0 + 0.1 from the nose, so the CG stands 1.1 - cg above the ground.
-    assert y[IZ] == pytest.approx(1.1 - cg)
+    assert props.roll_inertia == pytest.approx(0.002)  # the test motors have no diameter: the dry value
+    assert y[IZ] == pytest.approx(1.1 - cg)  # feet plane 1.0 + 0.1 from the nose
     assert list(y[IQ]) == [1.0, 0.0, 0.0, 0.0]
     y[IBURNED] = 0.1
     assert dynamics.mass_properties(y).mass == pytest.approx(1.2)
@@ -73,8 +70,7 @@ def test_yaw_plane_mirrors_pitch_plane(rocket: RocketConfig, environment: Enviro
     assert dy[IVY] == pytest.approx(1.084454, abs=1e-5)
     assert dy[IVX] == 0.0
     assert dy[IVZ] == pytest.approx(3.969082, abs=1e-5)
-    # Leaning the nose toward +y is a negative rotation about x.
-    assert dy[IW] == pytest.approx([-2.360263, 0.0, 0.0], abs=1e-5)
+    assert dy[IW] == pytest.approx([-2.360263, 0.0, 0.0], abs=1e-5)  # nose toward +y: negative about x
     assert quat.tilt_rates(y[IQ], dy[IW])[1] > 0.0
 
 
@@ -185,9 +181,8 @@ def test_vertical_burn_with_zero_gimbal_stays_vertical(rocket: RocketConfig, env
     assert list(flight.y[IW]) == [0.0, 0.0, 0.0]
     assert flight.touchdown is not None
     assert flight.touchdown.miss_distance == 0.0 and flight.touchdown.tilt == 0.0
-    # RK4 overshoots the burnout step of this constant thrust curve by a little; mass is clipped.
-    assert flight.y[IBURNED] == pytest.approx(0.1, abs=1e-3)
-    assert flight.dynamics.mass_properties(flight.y).mass == pytest.approx(1.2)
+    assert flight.y[IBURNED] == pytest.approx(0.1, abs=1e-3)  # RK4 overshoots the burnout step a little
+    assert flight.dynamics.mass_properties(flight.y).mass == pytest.approx(1.2)  # clipped
 
 
 def test_roll_rate_is_untouched_by_thrust(rocket: RocketConfig, environment: EnvironmentConfig) -> None:
@@ -209,8 +204,7 @@ def test_solid_motor_cannot_be_reignited(rocket: RocketConfig, environment: Envi
 
 
 def test_liftoff_is_never_graded_as_a_landing(rocket: RocketConfig, environment: EnvironmentConfig) -> None:
-    # Burning propellant moves the CG toward the nose, which used to sink the feet below the
-    # pad on the first steps. A fast physics rate and a deflected gimbal made it worst.
+    """The CG moving noseward as propellant burns must not sink the feet below the pad, at any rate or gimbal."""
     for dt, gimbal in ((0.001, 0.0), (0.005, math.radians(10.0))):
         flight = Flight(RocketDynamics(rocket, environment), dt)
         flight.inputs.gimbal_pitch = gimbal
@@ -234,16 +228,14 @@ def test_pad_hold_keeps_feet_on_the_ground(rocket: RocketConfig, environment: En
 
 
 def test_pad_hold_until_thrust_exceeds_weight(environment: EnvironmentConfig) -> None:
-    # 20 N ascent motor cannot lift a 3 kg rocket at 10 m/s^2, so it stays on the pad.
-    heavy = make_rocket(dry_mass=3.0)
+    heavy = make_rocket(dry_mass=3.0)  # 20 N cannot lift 3 kg at 10 m/s^2
     flight = Flight(RocketDynamics(heavy, environment), 0.005)
     flight.inputs.ignite(0, 0.0)
     z0 = flight.y[IZ]
     for _ in range(100):
         flight.step()
     assert not flight.lifted_off
-    # The feet stay on the pad while the CG creeps toward the nose as propellant burns.
-    assert flight.y[IZ] >= z0
+    assert flight.y[IZ] >= z0  # the CG creeps toward the nose as propellant burns
     assert flight.dynamics.lowest_point(flight.y) == pytest.approx(0.0, abs=1e-12)
     assert flight.y[IBURNED] > 0.0
 
@@ -259,8 +251,7 @@ def test_touchdown_geometry_and_tip_over(rocket: RocketConfig, environment: Envi
     y[IQ] = quat.from_axis_angle(ROTATE_Y, 0.2)
     expected = y[IZ] - cg_height * math.cos(0.2) - 0.15 * math.sin(0.2)
     assert dynamics.lowest_point(y) == pytest.approx(expected)
-    # Upside down the nose is the lowest point.
-    y[IQ] = quat.from_axis_angle(ROTATE_Y, math.pi)
+    y[IQ] = quat.from_axis_angle(ROTATE_Y, math.pi)  # upside down the nose is the lowest point
     assert dynamics.lowest_point(y) == pytest.approx(y[IZ] - 0.76 / 1.3)
 
 

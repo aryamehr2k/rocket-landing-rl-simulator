@@ -1,9 +1,6 @@
 """Flying the electric vehicle's mission with the PID or a trained model, one flight or many.
 
-A model folder (models/<name>/, written by scripts/train.py or scripts/export_policy.py) holds
-the network in policy.npz and copies of the training, vehicle and mission files it was trained
-with. Flights with the same seed get the same sensor noise, gusts and hidden errors, so the PID
-and a model can be compared flight by flight.
+The same seed gives the same sensor noise, gusts and hidden errors, so the PID and a model compare flight by flight.
 """
 
 from dataclasses import dataclass, replace
@@ -23,7 +20,6 @@ from rocketsim.hop.vehicle import HopVehicleConfig, load_vehicle_config
 from rocketsim.observation import ObservationBuilder
 from rocketsim.policy import POLICY_FILE, load_policy
 from rocketsim.simconfig import SimConfig, WindConfig
-from rocketsim.units import g_to_kg
 
 CONFIG_DIR = "configs"
 TRAINING_DIR = "training"
@@ -61,7 +57,7 @@ def draw_errors(ranges: HiddenErrorRanges, seed: int, factor: float = 1.0) -> Ho
     rng = np.random.default_rng(seed + ERROR_SEED_OFFSET)
     return HopErrors(
         thrust_scale=float(rng.uniform(*scale_range(ranges.thrust_scale, factor))),
-        dry_mass_offset=g_to_kg(float(rng.uniform(*scale_range(ranges.dry_mass_offset, factor)))),
+        dry_mass_offset=float(rng.uniform(*scale_range(ranges.dry_mass_offset, factor))),
     )
 
 

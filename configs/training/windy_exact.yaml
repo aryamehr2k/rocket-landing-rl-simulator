@@ -1,4 +1,4 @@
-# Same as windy.yaml without the randomize section: no hidden errors, for reproducing the README tables.
+# Same as windy.yaml without the randomize section: no hidden errors, for reproducing the tables in docs/solid_rocket.md.
 
 simulation:
   physics_rate_hz: 200

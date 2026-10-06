@@ -1,7 +1,6 @@
 """Per-flight errors the flight computer does not know: motor strength, dry mass, device drag area.
 
-The flight computer keeps flying the nominal rocket file; only the physics sees these draws.
-Thrust scales multiply thrust but not mass flow, as docs/conventions.md says for the motors.
+Only the physics sees these draws. Thrust scales multiply thrust but not mass flow.
 """
 
 from dataclasses import dataclass, replace

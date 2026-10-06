@@ -1,8 +1,6 @@
 """Evaluation of a trained model against the PID after training, written into the model folder.
 
-Both fly the same seeds with the training file's hidden error ranges and the evaluation wind.
-The flight logs stay in the run folder (they are large); the model folder gets the summary,
-the plots and, if asked, a 3D animation of the first flight.
+The flight logs stay in the run folder (they are large); the model folder gets the summary, plots and animation.
 """
 
 import os

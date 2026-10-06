@@ -1,8 +1,6 @@
 """Many flights of one setup on consecutive seeds, spread over a process pool as a background job.
 
-Every flight records a thinned-out path (time, x, y, height) for the browser's plots instead of
-a log file. With "compare with PID" the PID flies the same seeds, so the hidden errors, sensor
-noise and gusts match flight by flight.
+Each flight keeps a thinned-out path for the plots instead of a log file; the PID can fly the same seeds to compare.
 """
 
 import multiprocessing

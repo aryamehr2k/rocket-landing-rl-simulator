@@ -1,20 +1,6 @@
 """HTTP server of the dashboard: the page's files and the JSON and event-stream routes.
 
-GET  /                        the page (dashboard/index.html) and its .js and .css files
-GET  /api/options             file lists, defaults and limits for the forms
-GET  /api/fly/status          state of the live flight
-GET  /api/fly/stream          the live flight as Server-Sent Events: setup, frame, ..., result
-POST /api/fly/start           launch a live flight with the form values and a playback speed
-POST /api/fly/control         wind, push, speed or pause during the flight
-POST /api/fly/stop            stop the live flight
-POST /api/batch               fly many flights in the background; returns the job id
-GET  /api/batch/latest        the most recent batch job
-GET  /api/batch/<id>          progress of a batch job, and its results when done
-GET  /api/training/runs       run folders with their state, and the trainings started here
-GET  /api/training/run?path=  one run's progress series and the end of its console log
-POST /api/training/start      start scripts/train.py in the background
-POST /api/training/stop       stop a training started here
-GET  /api/models              exported models and finished hop runs
+The live flight streams from /api/fly/stream as Server-Sent Events: setup, frame, ..., result.
 """
 
 import json

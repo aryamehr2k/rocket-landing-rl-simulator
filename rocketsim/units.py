@@ -1,8 +1,4 @@
-"""Unit conversion for values read from YAML.
-
-Code uses SI units everywhere. YAML keys carry a suffix that says which unit the
-value is written in, see docs/conventions.md. The suffix is dropped after conversion.
-"""
+"""Unit conversion for values read from YAML: a key's suffix names its unit, and the code uses SI everywhere."""
 
 import math
 from typing import Callable
@@ -13,6 +9,7 @@ US_PER_S = 1.0e6
 MS_PER_S = 1000.0
 CM2_PER_M2 = 1.0e4
 DEG_PER_RAD = 180.0 / math.pi
+STANDARD_GRAVITY = 9.80665  # m/s^2, the g in thrust-to-weight and sensor ranges given in g
 
 
 def mm_to_m(value: float) -> float:
@@ -51,9 +48,9 @@ def identity(value: float) -> float:
     return value
 
 
-# Longest suffixes first so that "_deg_per_s" wins over "_s".
 Converter = Callable[[float], float]
 
+# Longest suffixes first, so "_deg_per_s" wins over "_s".
 SUFFIX_CONVERSIONS: list[tuple[str, Converter]] = [
     ("_us_per_deg", us_per_deg_to_us_per_rad),
     ("_deg_per_mps", deg_to_rad),

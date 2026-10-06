@@ -1,8 +1,4 @@
-"""Reward terms for the landing policy. Every weight comes from the training YAML.
-
-Rewards are computed per plane: the touchdown speed, tilt, crash and landed terms are shared,
-the lateral terms use that plane's own position and speed. Penalties are negative weights.
-"""
+"""Reward terms for the landing policy, per control plane, weighted from the training YAML (penalties negative)."""
 
 import math
 from dataclasses import dataclass

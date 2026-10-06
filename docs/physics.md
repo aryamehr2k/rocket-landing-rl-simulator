@@ -1,25 +1,12 @@
-# The physics that decides the landing
+# Physics of the landing
 
-This page explains every formula the simulator uses to land the example rocket, with the
-example's own numbers put in, for a reader who has done first-year physics and nothing else. The
-rocket is `configs/rockets/example_tvc.yaml` with the motors in `configs/motors/` and the launch
-site in `configs/training/default.yaml`. Every number comes from those files or from running the
-project's code on them, and none of it means anything for your rocket until you replace the
-numbers with measurements.
+The formulas the simulator uses, worked through with the example rocket's numbers. The rocket is
+`configs/rockets/example_tvc.yaml` with the motors in `configs/motors/` and the launch site in
+`configs/training/default.yaml`; every number comes from those files or from running the project's
+code on them. Replace the numbers with your measurements. The design and the simulator results
+for this rocket are in [solid_rocket.md](solid_rocket.md).
 
-## How to read this page
-
-Every formula gets the same block:
-- a heading that says the question it answers;
-- the formula in a code box, written the way you would type it into a calculator;
-- **What the symbols mean**: one line per symbol with its unit and where the number comes from (a
-  YAML key, a measurement or an earlier formula);
-- **Worked example**: the example rocket's numbers step by step with the result and its unit, and
-  a note wherever a number differs slightly from the README;
-- **What it tells you**: what changes if you change a number and what that means for the rocket
-  you build.
-
-Words used on this page:
+## Terms and symbols
 
 - A **station** is a distance from the nose tip toward the tail: the `_from_nose_mm` keys, in
   millimetres in the YAML and in metres here.
@@ -108,8 +95,7 @@ dm/dt = T / c,   c = J / m_prop           J = total impulse, m_prop = propellant
 burns `31 / 1363 = 0.023 kg/s`. By the end of the hard part 30 g are gone: `m = 1.402 kg` and
 `x_cg = 0.490 m`. By touchdown, about 4.3 s after thrust on, 58 g are gone: `m = 1.374 kg` and
 `x_cg = (0.540 + 0.051 + 0.111 * 0.690) / 1.374 = 0.486 m` (formula 12). With both motors empty
-(landing case `0.169 - 0.093 = 0.076 kg`): `m = 1.339 kg` and `x_cg = 0.481 m`. The README says
-"about 1.4 kg on the pad"; the file's masses add up to 1.494 kg.
+(landing case `0.169 - 0.093 = 0.076 kg`): `m = 1.339 kg` and `x_cg = 0.481 m`.
 
 **What it tells you:** the centre of gravity moves 13 mm forward during the ascent burn, which is
 why formula 6 is judged at burnout, not on the pad. Weigh the rocket without its motors before
@@ -172,8 +158,9 @@ h_apogee   ~ h_burnout + v_burnout^2 / (2 * g)  minus what drag takes during the
 **Worked example:** `T / W = 55 / 14.65 = 3.75` at the peak, 2.7 on average.
 `v_burnout = 84.4 / 1.494 - 9.807 * 2.15 = 56.5 - 21.1 = 35.4 m/s`. The project's one dimensional
 flight with drag (`rocketsim.landing_design.ascent_apogee`) gives 35.3 m/s at 45 m, then
-`45 + 35.3^2 / (2 * 9.807) = 45 + 64 = 109 m` minus 4 m of drag in the coast: 105 m (the README's
-simulator flight of the first design reached 106 m).
+`45 + 35.3^2 / (2 * 9.807) = 45 + 64 = 109 m` minus 4 m of drag in the coast: 105 m (the
+simulator flight of the first design in
+[solid_rocket.md](solid_rocket.md#why-the-free-fall-was-fragile) reached 106 m).
 
 **What it tells you:** with the brake the apogee hardly matters: it only needs to give the rocket
 about 45 to 50 m of fall above the 18 m command height to be within 5 % of the terminal speed, so
@@ -232,8 +219,9 @@ burnout. If bigger fins put the centre of pressure 14 mm behind: at 20 m/s
 sqrt(0.293) = 0.54 per s`. A tilt doubles every `ln(2) / 0.54 = 1.3 s`; over the roughly 5 s from
 the brake opening (about 0.8 s after apogee, once the fall passes 8 m/s) to the motor lighting at
 18 m, it grows `exp(0.54 * 5) = 15` times, 1 degree into 15 degrees. The other way, 14 mm ahead,
-makes the coast unstable instead: the README's flight turned 1 degree at burnout into 30 degrees
-at apogee.
+makes the coast unstable instead: the simulator flight in
+[solid_rocket.md](solid_rocket.md#fins-and-stability) turned 1 degree at burnout into 30 degrees at
+apogee.
 
 **What it tells you:** aim for the centre of pressure at the burnout centre of gravity, to a few
 millimetres: smaller fins move it toward the nose, bigger fins toward the tail, and OpenRocket
@@ -264,13 +252,13 @@ file rounds the brake to 566 cm2, so the total is `566 + 26.5 = 592.5 cm2 = 0.05
 (`rocketsim.landing_design.descent_profile`) falls from the 105 m apogee and passes 100 m at
 9.8 m/s, 80 m at 17.0 m/s, 60 m at 18.9 m/s, 40 m at 19.6 m/s and 20 m at 19.9 m/s: 95 % of `v_t`
 by 58 m. An area 5 % off moves `v_t` to 19.6 or 20.5 m/s, 15 % off to 18.7 or 21.6 m/s (the
-README's 18.6 and 21.7 are simulator flights).
+18.6 and 21.7 m/s in [solid_rocket.md](solid_rocket.md#the-drag-brake) are simulator flights).
 
 **What it tells you:** the speed goes with one over the square root of the area, so 15 m/s would
-need 858 cm2 of plate (855 in the README) and 25 m/s only 295 cm2. The burn can stop at most
+need 858 cm2 of plate (855 in solid_rocket.md) and 25 m/s only 295 cm2. The burn can stop at most
 21.5 m/s (formula 8), so the area must be known to about 5 %, from a drop test or from logging the
 terminal speed. Without any brake the rocket reaches the ground at 43 m/s (one dimensional) and
-passes 38 m at 35 m/s, where the README's first design lit its motor at 36 m/s.
+passes 38 m at 35 m/s, where the first design in solid_rocket.md lit its motor at 36 m/s.
 
 ## The landing burn
 
@@ -303,8 +291,7 @@ Size the hard part for the smallest brake area you might really have, because th
 arrival: 5 % less area is 20.5 m/s (formula 7). The design tool,
 `python scripts/design_landing_burn.py --rocket my_rocket.yaml --terminal-speed 20`, sizes the
 hard part for the terminal speed plus a small margin (20.3 m/s for the example) and prints the
-motor curve to order. A burn that cannot stop the arrival speed is not rescued by anything else on
-this page.
+motor curve to order.
 
 ### 9. When the flight computer sends the ignition command
 The flight computer cannot throttle a solid motor, so its one decision is when to send the igniter
@@ -341,8 +328,8 @@ speed). Faster speeds keep the edge's 16.0 m, so the burn still ends as low as i
 starting tens of metres early. Without the drag term the predicted speed would be
 `20 + 9.81 * 0.18 = 21.8 m/s`, beyond the edge, so the table would give 16.0 m and the command
 would go out at `16.0 + 0.5 * (20 + 21.8) * 0.18 = 16.0 + 3.8 = 19.8 m`, 1.6 m early. The
-README's 17 m and 14 m are simulator flights, where the estimate is noisy and the rocket arrives
-at 19.9 m/s.
+17 m and 14 m in solid_rocket.md are simulator flights, where the estimate is noisy and the rocket
+arrives at 19.9 m/s.
 
 **What it tells you:** every 10 ms of igniter delay the computer does not know about moves the
 stop point 0.2 m (formula 11), so fire about 20 igniters with your own circuit, time them, and put
@@ -376,17 +363,17 @@ keeps getting gentler; `1.60^2 / (2 * 1.81) = 0.70 m/s2` is the effective value 
 "2.9 s after the stop" includes about 0.7 s of climb and turn-around before the 2.2 s sink. The
 tail lasts `8.0 - 1.56 = 6.4 s`. A stop 1.03 m too high sinks from `1.81 + 1.03 = 2.84 m`: at the
 effective 0.70 m/s2 it needs `sqrt(2 * 2.84 / 0.70) = 2.85 s` and lands at
-`sqrt(2 * 0.70 * 2.84) = 2.0 m/s`, the leg limit. The README's 1.6 m, 1.1 m and 6.5 s come from
-the tool's sizing run (`--terminal-speed 20`), whose motor differs from the file's by rounding
-(tail to 8.06 s).
+`sqrt(2 * 0.70 * 2.84) = 2.0 m/s`, the leg limit. The 1.6 m, 1.1 m and 6.5 s in solid_rocket.md
+come from the tool's sizing run (`--terminal-speed 20`), whose motor differs from the file's by
+rounding (tail to 8.06 s).
 
 **What it tells you:** a tail ratio near 1 sinks so slowly that the motor runs out in the air; a
 ratio well below 0.9 lands hard. The tail must last longer than the slowest sink it may have to do,
 which is why the example's tail runs 6.4 s and the old 3.7 s tail failed.
 
 ### 11. What a small error costs
-The stop point is planned 1.5 m up and comes out at 1.67 m in the one dimensional flight. Three
-kinds of error move it, and this is by how much.
+The stop point is planned 1.5 m up and comes out at 1.67 m in the one dimensional flight. Timing,
+mass, thrust and speed estimate errors move it by:
 ```
 timing error dt (igniter, control step):    stop moves by  v * dt
 mass error s (fraction):                    stop moves by  d * s * (a + g) / a
@@ -407,8 +394,8 @@ stops 0.54 m high. Thrust 1 % off: `13.1 * 0.01 * 31 / (1.432 * 15.3) = 0.18 m`.
 0.3 m/s off: `0.3 * 20 / 15.3 = 0.39 m` (the design tool prints the same four numbers). In the
 project's first design, which fell without a brake and lit the motor at 36 m/s, the same 30 ms
 cost `36 * 0.03 = 1.1 m`. The tool's one dimensional flights allow a stop 1.8 m too low or 1.0 m
-too high before the touchdown exceeds 2 m/s (the README's 1.1 m is the sizing run's). A stop
-1.8 m too low means the hard part would only have reached 0.5 m/s 0.2 m under the ground: the
+too high before the touchdown exceeds 2 m/s (the 1.1 m in solid_rocket.md is the sizing run's).
+A stop 1.8 m too low means the hard part would only have reached 0.5 m/s 0.2 m under the ground: the
 rocket meets the ground while the hard part is still slowing it, at 2 m/s. The 30 ms error lands
 at 1.3 m/s when the stop is low and 1.8 m/s when it is high.
 
@@ -440,7 +427,7 @@ of this and `max_touchdown_tilt_deg`, so 10 degrees. The other leg limits are 2 
 **What it tells you:** with three legs the angle drops to 8.0 degrees; a 400 mm span raises it to
 14.8 degrees. So use four legs on the widest span the airframe allows and keep them short, and
 keep `max_touchdown_tilt_deg` below the tip-over angle. The sideways speed limit is the one the
-wind attacks: two of the three windy failures in the README were sideways speed (1.05 m/s) and
+wind attacks: two of the three windy failures in solid_rocket.md were sideways speed (1.05 m/s) and
 tilt (11.3 degrees) alone; the third exceeded both the 2 m/s descent limit (2.08 m/s) and the
 sideways limit (1.10 m/s), after the rocket swung in the wind.
 

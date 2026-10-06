@@ -37,8 +37,8 @@ results are in `model.json` under `checks` and `firmware.replay_check`.
 | `hop/hop_fields.h` | the names of the inputs the network can use |
 | `tests/hop_replay.c`, `tests/policy_check.c` | desktop checks |
 
-To build it for a board, copy the model's headers in, then compile the four `.c` files with your
-board's project:
+To build it for a board, copy the model's headers in, then compile `policy/policy.c`,
+`hop/hop_mission.c` and `hop/hop_control.c` with your board's project:
 
 ```
 python scripts/export_policy.py runs/<run> --name hop_v1 --install   # copies the headers into firmware/

@@ -1,8 +1,4 @@
-"""Flight logs with a fixed CSV schema shared by the simulator and the firmware.
-
-Columns the writer does not know yet are written as nan. The firmware writes the same
-column names for the values it has. Frames and units follow docs/conventions.md.
-"""
+"""Flight logs with a fixed CSV schema shared by the simulator and the firmware; unknown values are written as nan."""
 
 import csv
 import math

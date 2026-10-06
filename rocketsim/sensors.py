@@ -1,8 +1,6 @@
-"""Sensor models and the sensor YAML: a three axis IMU and a barometer.
+"""Sensor models and the sensor YAML: a three axis IMU, a barometer and an optional GPS.
 
-Each sensor samples at its own rate, reports the true value from `lag` seconds earlier plus
-a bias drawn once per flight and white noise, and is clipped to its range. Frames follow
-docs/conventions.md: the IMU reads specific force and angular rate in the body frame.
+A sample is the true value from `lag` seconds earlier plus a per-flight bias and white noise, clipped to the range.
 """
 
 from collections import deque
@@ -114,6 +112,8 @@ def _channel(section: Section, unit: str) -> ImuChannelConfig:
 
 @dataclass(frozen=True)
 class ImuSample:
+    """Specific force (m/s^2) and angular rate (rad/s), both in the body frame."""
+
     time: float
     specific_force: np.ndarray
     angular_rate: np.ndarray

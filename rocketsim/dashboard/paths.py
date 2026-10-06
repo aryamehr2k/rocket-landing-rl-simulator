@@ -1,8 +1,6 @@
 """The folders the dashboard reads and writes, and the check that keeps browser paths inside them.
 
-The browser names files with paths relative to the project such as
-`configs/vehicles/electric_hopper.yaml` or `runs/20261006_070357_hop`. The first part picks one
-of the allowed folders (configs, models, runs); anything that resolves outside it is refused.
+A browser path starts with configs/, models/ or runs/, for example `configs/vehicles/electric_hopper.yaml`.
 """
 
 from dataclasses import dataclass

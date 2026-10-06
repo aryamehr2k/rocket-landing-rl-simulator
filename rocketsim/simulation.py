@@ -1,10 +1,6 @@
 """The closed loop: sensors, flight computer, actuators, physics and the flight log.
 
 One `control_step` runs the flight computer once and the physics `steps_per_control` times.
-The scripted flight and the Gymnasium environment both drive it this way. Each `reset` draws
-the flight's hidden errors (motor strength, dry mass, device drag area) from the training YAML's
-`randomize` section and rebuilds `dynamics` for them, so read `sim.dynamics` after a reset, never
-cache it across flights; the flight computer keeps the nominal rocket file.
 """
 
 from collections import deque
@@ -61,7 +57,10 @@ class Simulation:
         self.reset(seed)
 
     def reset(self, seed: int | None = None) -> None:
-        """Start a new flight. The same seed repeats the sensor errors, igniter delays, gusts and hidden errors exactly."""
+        """Start a new flight. The same seed repeats the sensor errors, igniter delays, gusts and hidden errors exactly.
+
+        The hidden errors rebuild `dynamics`, so read `sim.dynamics` after a reset instead of keeping it across flights.
+        """
         if seed is not None:
             self.rng = np.random.default_rng(seed)
             self.wind.rng = self.sensors.rng = self.rng

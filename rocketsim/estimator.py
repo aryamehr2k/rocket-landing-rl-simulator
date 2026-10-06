@@ -1,10 +1,6 @@
 """Fixed gain state estimator for the flight computer.
 
-Runs in float32 with the same operations in the same order as the C version so both give the
-same numbers. On the pad it averages the gyro for its bias, the accelerometer for the initial
-attitude and the barometer for its offset. In flight it integrates the gyro into the attitude,
-the accelerometer into velocity and position, and corrects altitude and vertical speed with
-each barometer sample. See docs/conventions.md.
+Runs in float32 with the same operations in the same order as the C version, so both give the same numbers.
 """
 
 from collections import deque
@@ -164,7 +160,7 @@ class Estimator:
         self.velocity[:2] = self.velocity[:2] + self.gps_velocity_gain * (sample.velocity.astype(F32) - self.velocity[:2])
 
     def liftoff(self) -> None:
-        """Freeze the pad calibration and start integrating."""
+        """Freeze the pad calibration (gyro bias, attitude, barometer and GPS offsets) and start integrating."""
         if self._gyro_window:
             self.gyro_bias = np.mean(np.stack(self._gyro_window), axis=0).astype(F32)
         if self._accel_window:

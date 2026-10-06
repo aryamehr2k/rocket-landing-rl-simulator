@@ -1,19 +1,23 @@
 """Phases, PID signs, landing trigger table and safety refusals."""
 
 import math
+from dataclasses import replace
 
 import numpy as np
 import pytest
 
-from tests.conftest import constant_thrust_motor, make_environment, make_rocket
+from tests.conftest import EXAMPLE_ROCKET, EXAMPLE_SIM, constant_thrust_motor, make_environment, make_rocket
 from rocketsim.commands import ControlCommand
-from rocketsim.config import MotorConfig, RocketConfig
+from rocketsim.config import MotorConfig, RocketConfig, load_rocket_config
+from rocketsim.dragdevice import DragDeviceConfig
 from rocketsim.estimator import Estimate
+from rocketsim.flightcomputer import FlightComputer
 from rocketsim.landing_trigger import LandingTrigger
 from rocketsim.phases import Phase, PhaseMachine
 from rocketsim.pid import PlanePid, world_to_servo
 from rocketsim.quaternion import IDENTITY, from_axis_angle
 from rocketsim.safety import Safety
+from rocketsim.simconfig import load_sim_config
 
 G = 10.0
 DT = 0.02
@@ -135,15 +139,6 @@ def test_abort_zeroes_everything(safety: Safety) -> None:
     assert command == ControlCommand()
 
 
-from dataclasses import replace
-
-from rocketsim.config import load_rocket_config
-from rocketsim.dragdevice import DragDeviceConfig
-from rocketsim.flightcomputer import FlightComputer
-from rocketsim.simconfig import load_sim_config
-from tests.conftest import EXAMPLE_ROCKET, EXAMPLE_SIM
-
-
 def example_computer() -> FlightComputer:
     rocket = load_rocket_config(EXAMPLE_ROCKET)
     return FlightComputer(rocket, load_sim_config(EXAMPLE_SIM).environment, DT, 2.0)
@@ -200,8 +195,7 @@ def test_delay_prediction_counts_the_drag() -> None:
     required = float(trigger.required_height(later_speed))
     assert trigger.should_ignite(required + fallen - 0.01, speed, brake_fraction=1.0)
     assert not trigger.should_ignite(required + fallen + 0.01, speed, brake_fraction=1.0)
-    # With the brake shut the prediction adds gravity's full 1.8 m/s and fires higher up.
-    assert trigger.should_ignite(required + fallen + 0.01, speed, brake_fraction=0.0)
+    assert trigger.should_ignite(required + fallen + 0.01, speed, brake_fraction=0.0)  # shut: gravity's full 1.8 m/s
     decisions = trigger.should_ignite(np.array([height, 5.0]), np.array([speed, speed]), 1.0)
     assert list(decisions) == [False, True]
 
@@ -237,9 +231,8 @@ def test_required_height_stays_at_the_edge_beyond_the_table_reach() -> None:
     assert float(trigger.required_height(edge + 0.5)) == at_edge
     assert float(trigger.required_height(40.0)) == at_edge
     assert float(trigger.required_height(edge - 0.5)) < at_edge
-    # Without the cap the whole burn's fall distance would apply: tens of metres, not the edge value.
     whole_burn = float(trigger.burn(edge + 0.5).distance) + trigger.config.target_height
-    assert whole_burn > at_edge + 10.0
+    assert whole_burn > at_edge + 10.0  # what an uncapped table would ask for: tens of metres more
 
 
 def test_drag_fit_skips_slow_and_tilted_samples_and_corrects_for_tilt() -> None:
@@ -266,36 +259,19 @@ def test_warning_when_the_terminal_speed_is_near_the_table_reach() -> None:
 
 
 def test_safety_rate_limits_the_gimbal_command() -> None:
-    from dataclasses import replace as dc_replace
-
-    from rocketsim.commands import ControlCommand
-    from rocketsim.config import load_rocket_config
-    from rocketsim.safety import Safety
-    from tests.conftest import EXAMPLE_ROCKET
-
     rocket = load_rocket_config(EXAMPLE_ROCKET)
-    config = dc_replace(rocket.computer.safety, max_gimbal_rate=math.radians(100.0))
+    config = replace(rocket.computer.safety, max_gimbal_rate=math.radians(100.0))
     safety = Safety(config, rocket.gimbal, control_dt=0.02)
-    estimate = None
     big = ControlCommand(gimbal_pitch=math.radians(7.0), gimbal_yaw=-math.radians(7.0))
-    first, _ = safety.filter(big, Phase.LANDING_BURN, 5.0, 0.0, _still_estimate(), 10.0)
+    first, _ = safety.filter(big, Phase.LANDING_BURN, 5.0, 0.0, estimate(), 10.0)
     assert first.gimbal_pitch == pytest.approx(math.radians(2.0))
     assert first.gimbal_yaw == pytest.approx(-math.radians(2.0))
     for _ in range(3):
-        last, _ = safety.filter(big, Phase.LANDING_BURN, 5.0, 0.0, _still_estimate(), 10.0)
+        last, _ = safety.filter(big, Phase.LANDING_BURN, 5.0, 0.0, estimate(), 10.0)
     assert last.gimbal_pitch == pytest.approx(math.radians(7.0))
     safety.reset()
-    again, _ = safety.filter(big, Phase.LANDING_BURN, 5.0, 0.0, _still_estimate(), 10.0)
+    again, _ = safety.filter(big, Phase.LANDING_BURN, 5.0, 0.0, estimate(), 10.0)
     assert again.gimbal_pitch == pytest.approx(math.radians(2.0))
-    unlimited = Safety(dc_replace(config, max_gimbal_rate=None), rocket.gimbal, control_dt=0.02)
-    free, _ = unlimited.filter(big, Phase.LANDING_BURN, 5.0, 0.0, _still_estimate(), 10.0)
+    unlimited = Safety(replace(config, max_gimbal_rate=None), rocket.gimbal, control_dt=0.02)
+    free, _ = unlimited.filter(big, Phase.LANDING_BURN, 5.0, 0.0, estimate(), 10.0)
     assert free.gimbal_pitch == pytest.approx(math.radians(7.0))
-
-
-def _still_estimate():
-    import numpy as np
-
-    from rocketsim.estimator import Estimate
-    from rocketsim.quaternion import IDENTITY
-
-    return Estimate(np.zeros(3), np.zeros(3), IDENTITY.astype(np.float32), np.zeros(3))

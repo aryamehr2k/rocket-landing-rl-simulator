@@ -4,17 +4,17 @@ The second vehicle in this project: a 1.5 kg rocket that boosts on one solid mot
 under a nose drag brake and lands on a second solid motor. A PID flies the boost, a stopping
 distance table lights the landing motor, and a trained network can steer the landing burn.
 This page collects the design notes and commands for it; the electric test vehicle is covered
-in the main README.
+in [README.md](../README.md).
 
-## Details
+## Adding a rocket
 
-### Adding a rocket
-
-Copy `configs/rockets/example_tvc.yaml`, rename it and change the values. Every position is
-a station measured from the nose tip toward the tail in millimetres. The keys carry their
-unit in the suffix (`dry_mass_g`, `pivot_from_nose_mm`, `max_angle_deg`) and are converted
-on load, so type the number in the unit the key names. Unknown keys and out of range values
-are rejected with a message that names the file and the key.
+Copy `configs/rockets/example_tvc.yaml`, rename it and change the values.
+[rocket_data_checklist.md](rocket_data_checklist.md) ([PDF](rocket_data_checklist.pdf)) lists
+what to measure for each value, how to measure it and how accurately the landing needs it.
+Every position is a station measured from the nose tip toward the tail in millimetres. The keys
+carry their unit in the suffix (`dry_mass_g`, `pivot_from_nose_mm`, `max_angle_deg`) and are
+converted on load, so type the number in the unit the key names. Unknown keys and out of range
+values are rejected with a message that names the file and the key.
 
 The file has these sections:
 
@@ -27,8 +27,8 @@ The file has these sections:
   it thrusts through the gimbal, and the igniter delay as a mean and a spread in seconds.
 - `drag_device` (optional): the drag brake. `drag_area_cm2` is the drag coefficient times the
   area of the open petals, `station_from_nose_mm` where they sit, `deploy_time_s` and
-  `retract_time_s` how fast they open and shut. Put it near the nose; see the drag brake
-  section for why the legs must never be the brake.
+  `retract_time_s` how fast they open and shut. Put it near the nose; see
+  [The drag brake](#the-drag-brake) for why the legs must never be the brake.
 - `gimbal`: pivot station, maximum deflection, servo rate limit, delay and deadband, and one
   calibration block per servo (`pitch` leans the nose toward +x, `yaw` toward +y) from gimbal
   angle to pulse width in microseconds.
@@ -38,11 +38,12 @@ The file has these sections:
 - `control`: control loop rate and how many control steps an action is delayed.
 - `sensors`: the sensor YAML to use, see below.
 - `estimator`, `phases`, `landing_trigger`, `pid`, `safety`: what runs on the flight
-  computer. The README section on the landing burn and `docs/conventions.md` explain each
-  value; the comments in the example file say what they do in one line. `landing_trigger`
-  has `thrust_margin` (set it to the strongest motor of your batch, for example 1.02) and
-  `calibrate_drag_in_flight` (fit the brake's drag from the accelerometer during the descent
-  and rebuild the trigger table; a way to measure the brake on early flights, off by default).
+  computer. [The landing burn](#the-landing-burn) below and [conventions.md](conventions.md)
+  explain each value; the comments in the example file say what they do in one line.
+  `landing_trigger` has `thrust_margin` (set it to the strongest motor of your batch, for
+  example 1.02) and `calibrate_drag_in_flight` (fit the brake's drag from the accelerometer
+  during the descent and rebuild the trigger table; a way to measure the brake on early
+  flights, off by default).
   `safety.max_gimbal_rate_deg_per_s` limits how fast the gimbal command may move, whoever
   issues it, so neither the PID nor a trained policy can whip the servos.
 - `brake` (needs a `drag_device`): the flight computer's rules for it. Open once the descent
@@ -52,23 +53,24 @@ The file has these sections:
 `configs/rockets/example_tvc_freefall.yaml` is the same rocket without the brake and with the
 old landing motor, kept so you can compare the two designs with the same commands.
 
-A note on fins, because it decides whether the rocket can land at all. A rocket with the
-centre of pressure behind the centre of gravity is stable nose-first, which is what fins are
-for on a normal model rocket. The same geometry makes tail-first flight unstable: once the
-rocket starts falling, any small tilt grows exponentially until it is nose-down. The opposite
-choice, centre of pressure ahead of the centre of gravity, makes the unpowered coast after
-burnout unstable instead: the simulator showed a 14 mm margin turning a 1 degree tilt at
-burnout into 30 degrees at apogee, and the landing motor then lit with the rocket far from
-vertical. There is no thrust during the coast or the descent, so the gimbal cannot help in
-either case. The example rocket therefore has only vestigial fins and its centre of pressure
-sits at the centre of gravity after the ascent burn, where it is neutral: whatever tilt and
-turning rate it has at burnout it keeps, slowly, until the landing burn takes over. It is
-unstable during both burns, which is what the thrust vector control is for. Judge the margin
+### Fins and stability
+
+A rocket with the centre of pressure behind the centre of gravity is stable nose-first, which
+is what fins are for on a normal model rocket. The same geometry makes tail-first flight
+unstable: once the rocket starts falling, any small tilt grows exponentially until it is
+nose-down. The opposite choice, centre of pressure ahead of the centre of gravity, makes the
+unpowered coast after burnout unstable instead: the simulator showed a 14 mm margin turning a
+1 degree tilt at burnout into 30 degrees at apogee, and the landing motor then lit with the
+rocket far from vertical. There is no thrust during the coast or the descent, so the gimbal
+cannot help in either case. The example rocket therefore has only vestigial fins and its centre
+of pressure sits at the centre of gravity after the ascent burn, where it is neutral: whatever
+tilt and turning rate it has at burnout it keeps, slowly, until the landing burn takes over. It
+is unstable during both burns, which is what the thrust vector control is for. Judge the margin
 at burnout, not on the pad, because the motors sit at the tail and the centre of gravity moves
 forward as propellant burns. The simulator models all of this, so you can see what your own
 fins do before you build them.
 
-### Adding a motor
+## Adding a motor
 
 Drop the `.eng` file from ThrustCurve.org into `configs/motors/` and point the rocket file at
 it. The `.eng` header gives the propellant and total mass, and the pairs after it are the
@@ -82,9 +84,7 @@ Solid motors cannot throttle or restart. For solids the landing decision is when
 ignition command and how to steer the gimbal during the burn. A YAML motor with
 `throttleable: true` also gets a throttle input with a first order lag.
 
-### The landing burn
-
-This is the part of the project that decides everything else, so it gets its own section.
+## The landing burn
 
 The flight computer builds a table at start-up: for every descent speed, how far the rocket
 falls from the moment the landing motor lights until the burn has brought it down to
@@ -92,11 +92,11 @@ falls from the moment the landing motor lights until the burn has brought it dow
 gravity and drag in one dimension. In flight it watches the estimated height and speed,
 adds the igniter delay and its own control loop latency, and sends the igniter command the
 moment the height it will have when thrust starts drops to the table value plus
-`target_height_m`. That is all a solid motor allows: one decision, made once. Above the
+`target_height_m`. A solid motor allows only this one decision. Above the
 fastest speed the burn can stop at all, the table keeps the height of that edge rather than
 firing tens of metres early, so the burn still ends as low as it can.
 
-The catch is that the burn's impulse is fixed. If the hard part of the burn is too weak for
+The burn's impulse is fixed. If the hard part of the burn is too weak for
 the speed the rocket has when it lights, the rocket reaches the ground with speed left. If it
 is too strong, the rocket stops in the air and climbs on the leftover thrust, then falls from
 wherever the burn ends. The stop point is where the hard part has brought the descent down
@@ -108,11 +108,12 @@ throws the rocket up a little, and the weak tail then needs seconds to bring it 
 tail must last that long. The example's 6.5 s tail survives a stop 1.1 m too high; the old
 3.7 s tail did not, and that is what made the free fall fragile.
 
-#### Why the free fall was fragile
+### Why the free fall was fragile
 
 The first design let the rocket free-fall from its 106 m apogee. Drag on the slim body is
 only about 2 N against 14 N of weight, so it kept speeding up and lit the motor at 36 m/s,
-38 m above the ground, with a 46 N hard burn. Three things then had to be right at once:
+38 m above the ground, with a 46 N hard burn. At that speed small errors moved the stop point
+a long way:
 
 | error, one at a time                 | moves the stop point by | touchdown (1D model)                  |
 |--------------------------------------|-------------------------|---------------------------------------|
@@ -133,22 +134,25 @@ motor. In the simulator this design landed 14 of 20 flights in calm air and 12 o
 4 m/s gusty wind, and with motors 5 % off or the rocket 40 g lighter than the flight computer
 believed it landed none.
 
-#### The fix: arrive at the same speed every time
+### The fix: arrive at the same speed every time
 
-A solid motor cannot throttle, and tilting the rocket to throw thrust away costs 4 to 20 times
-as much sideways push as the thrust it removes (0 of 30 landings in wind when we tried it). A
-gentler, earlier burn is not the answer either: it lands less often, because a weak brake's
-stopping distance is more sensitive to thrust and mass errors. Descending slowly under power
-is out of the question with a solid: hovering costs 14 N s per second, and coming down 100 m
-at 5 m/s would burn 280 N s, more than two of these motors.
+Options we rejected:
 
-What works is to make the rocket arrive at the burn at the same speed every flight. The
-example rocket now opens a drag brake at the nose once it is falling faster than 8 m/s after
-apogee. Drag then equals weight at 20 m/s, so the speed stops growing there: this is the
-terminal speed, and the rocket reaches it whatever the apogee was. The landing motor is sized
-for that one arrival speed: 31 N (2.2 times the weight) for 1.41 s, then a 12.6 N tail (0.92
-of the weight) to 8 s. This is the speed profile the simulator gives, feet height to speed
-down:
+- Throttling the landing motor: a solid motor cannot throttle.
+- Tilting the rocket to throw thrust away: it costs 4 to 20 times as much sideways push as the
+  thrust it removes (0 of 30 landings in wind when we tried it).
+- A gentler, earlier burn: it lands less often, because the stopping distance of a weaker burn
+  is more sensitive to thrust and mass errors.
+- Descending slowly under power: hovering costs 14 N s per second, and coming down 100 m at
+  5 m/s would burn 280 N s, more than two of these motors.
+
+The design instead fixes the arrival speed with a drag brake, so the rocket reaches the burn at
+the same speed every flight. The example rocket opens the brake at the nose once it is falling
+faster than 8 m/s after apogee. Drag then equals weight at 20 m/s, so the speed stops growing
+there: this is the terminal speed, and the rocket reaches it whatever the apogee was. The
+landing motor is sized for that one arrival speed: 31 N (2.2 times the weight) for 1.41 s, then
+a 12.6 N tail (0.92 of the weight) to 8 s. This is the speed profile the simulator gives, feet
+height to speed down:
 
 | height | 100 m | 80 m | 60 m | 40 m | 20 m | 17 m (motor lit) | 10 m | 5 m | 2 m | 1 m | touchdown |
 |--------|-------|------|------|------|------|------------------|------|-----|-----|-----|-----------|
@@ -201,7 +205,7 @@ tilt of 11.3 degrees, and seed 119 with 2.08 m/s of vertical speed and 1.10 m/s 
 A rocket that is lighter than the flight computer believes behaves like a stronger motor and
 still crashes; weigh the rocket before every flight and put the number in the file.
 
-### The drag brake
+## The drag brake
 
 Four flat petals of about 109 by 109 mm at the nose, roughly 470 cm2 of plate, give the
 example rocket a drag area (`Cd * A`) of about 570 cm2 on top of the body's 27 cm2 (the file
@@ -222,14 +226,17 @@ Why 20 m/s: at 15 m/s the brake needs 855 cm2 of plate and the rocket swings so 
 that it landed 6 of 30 windy flights; at 25 m/s the stop point is 1.5 times more sensitive to
 thrust errors. 20 m/s was the best of the three.
 
-Three rules came out of the failures. Open the petals only once the rocket falls faster than
-8 m/s, not at apogee, or the horizontal wind swings the rocket 40 to 60 degrees while it is
-still slow. Shut them at the hand-over from the hard burn to the tail (the descent below
-3 m/s), or the wind pushes on them during the slow sink; leaving them open cost 6 landings in
-30 windy flights. And expect a swing of 30 to 50 degrees in a 4 m/s wind during the descent,
-which is close to the 35 degree tilt at which the safety layer refuses to light the motor.
+Brake rules found in testing:
 
-What the simulator does not know: the petals are an ideal drag area. The real drag
+- Open the petals only once the rocket falls faster than 8 m/s, not at apogee, or the
+  horizontal wind swings the rocket 40 to 60 degrees while it is still slow.
+- Shut them at the hand-over from the hard burn to the tail (the descent below 3 m/s), or the
+  wind pushes on them during the slow sink; leaving them open cost 6 landings in 30 windy
+  flights.
+- Expect a swing of 30 to 50 degrees in a 4 m/s wind during the descent, which is close to the
+  35 degree tilt at which the safety layer refuses to light the motor.
+
+The simulator treats the petals as an ideal drag area. The real drag
 coefficient of petals sitting in the body's wake, their side forces and roll, and the true
 damping of the pendulum swing need a drop test or a wind tunnel. The brake area must be known
 to about 5 %: with 15 % more drag than the file says the rocket arrives at 18.6 m/s instead of
@@ -253,12 +260,12 @@ still stop the rocket:
 | 10 % more drag                                 | 17 of 20                    | 20 of 20                 |
 | 15 % more drag (arrives at 18.6 m/s)           | 9 of 20                     | 14 of 20                 |
 
-The example leaves the setting off, so the results in this README use the file's table; the
-flight log of `scripts/fly_scripted.py` prints the fitted area when it is on. Size the hard
-part for the low end of your drag estimate: a burn that cannot stop the arrival speed is not
-rescued by knowing it.
+The example leaves the setting off, so the results on this page use the file's table; the
+flight log of `scripts/fly_scripted.py` prints the fitted area when it is on. The fit does not
+add impulse, and a smaller drag area than planned means a faster arrival. Size the hard part of
+the burn for the fastest arrival speed you expect.
 
-### Your motor batch and the thrust window
+## Your motor batch and the thrust window
 
 The motor strength window is asymmetric. A motor weaker than the curve in the file leaves a
 little speed the tail can absorb: 4 % weak still lands 18 of 20, 5 % weak 16 of 20. A motor
@@ -276,7 +283,7 @@ strong none. So:
   now; +-60 ms still landed 29 of 30 in calm air but 24 of 30 in wind.
 - Weigh the rocket before each flight to 10 g and enter the mass.
 
-### Designing your own landing
+## Designing your own landing
 
 ```
 python scripts/design_landing_burn.py --rocket configs/rockets/example_tvc.yaml --terminal-speed 20
@@ -300,13 +307,14 @@ table in the section on the landing burn). The one dimensional model has no wind
 sideways speed, so its landing rate is an upper bound: 97 % on the example's error budget
 where the simulator gives 19 of 20.
 
-Two things the tool will tell you to watch. The hard part is sized for the terminal speed plus
-a small margin; if your brake area might be smaller than you think, size for the low end of
-its band, because a motor at the edge of its reach cannot be rescued. And the tail must last
-longer than the slow sink from the highest stop it can survive, which is why the example tail
-runs 6.5 s.
+Watch two outputs:
 
-### Adding sensors
+- The arrival speed the hard part is sized for: the terminal speed plus a small margin. Compare
+  it with the fastest arrival your brake area estimate allows.
+- The tail length: the tail must last longer than the slow sink from the highest stop it can
+  survive, which is why the example tail runs 6.5 s.
+
+## Adding sensors
 
 `configs/sensors/example_imu.yaml` describes the IMU and the barometer: sample rate, lag, the
 standard deviation of the bias drawn once per flight, the noise per sample and the range.
@@ -316,7 +324,7 @@ estimated vertical speed. Replace the numbers with what you measure with the boa
 still on a table; the datasheet noise density times the square root of the bandwidth is a
 fair start.
 
-### Flying
+## Flying
 
 ```
 python scripts/fly_scripted.py --out runs/landing.csv --plot
@@ -336,10 +344,10 @@ errors, igniter delays, gusts and hidden errors, and prints one line per flight 
 landed. `--wind-mps`, `--wind-direction-deg` and `--gust-mps` override the training YAML.
 
 Every flight also draws hidden errors from the `randomize` section of the training YAML:
-motor strength, dry mass and brake area within the listed ranges. The flight computer never
-sees them; that is the point. `configs/training/calm_exact.yaml` and `windy_exact.yaml` are
+motor strength, dry mass and brake area within the listed ranges. The flight computer does
+not see them. `configs/training/calm_exact.yaml` and `windy_exact.yaml` are
 `default.yaml` and `windy.yaml` without that section, so nothing hidden is drawn; the tables
-in this README were flown with them unless a row says otherwise. To sweep one error, pin it
+on this page were flown with them unless a row says otherwise. To sweep one error, pin it
 on top of an exact YAML, or the other errors are still drawn around it:
 
 ```
@@ -369,21 +377,23 @@ To plot a log you already have:
 python scripts/plot_flight.py runs/vertical.csv --out runs/vertical.png
 ```
 
-### Training the landing policy
+## Training the landing policy
 
-The policy is a small neural network (two layers of 32 neurons) trained with PPO from
-Stable-Baselines3 on the same simulation the PID flies. Install the training extras first
-(see Install), then:
+The policy is a small neural network (two layers of 32 neurons) trained with PPO
+(`rocketsim/ppo.py`) on the same simulation the PID flies. Install the training extras first
+(see [Quick start](../README.md#quick-start) in README.md), then:
 
 ```
 python scripts/train.py --rocket configs/rockets/example_tvc.yaml --training configs/training/default.yaml
 ```
 
-Every run gets a folder `runs/<date>_<time>_ppo/` with the model, the policy as plain numpy
-weights (`policy.npz`), the observation normalisation, the training log (`progress.csv`, one
-line per update with the landing rate of the last hundred flights) and exact copies of every
-YAML it used. Training the example for four million steps takes about an hour on a desktop;
-`--timesteps` overrides the YAML for a quick try.
+Every run gets a folder `runs/<date>_<time>_<name>/` (`--name`, default `ppo`) with the PPO
+network, optimizer and normalisation statistics (`model.pt`), the policy and its input
+normalisation as plain numpy weights (`policy.npz`), the training log (`progress.csv`, one line
+per update with the landing rate of the last hundred flights), `checkpoint.json`,
+`summary.json` and exact copies of every YAML it used under `configs/`. Training the example
+for four million steps takes about an hour on a desktop; `--timesteps` overrides the YAML for a
+quick try.
 
 What the policy does is decided in YAML, not code:
 
@@ -417,7 +427,7 @@ What the policy does is decided in YAML, not code:
 - `ppo`: how many flights run at once, how many worker processes, the network size and the
   usual PPO settings.
 
-### What the trained policy does so far
+## What the trained policy does so far
 
 The current run (`configs/training/default.yaml`, four million steps, policy steering the
 landing burn, the trigger table lighting the motor) against the PID on the same fifty seeds,
@@ -432,7 +442,9 @@ move per control step during the burn:
 | 4 m/s crosswind, 1.5 m/s gusts    | PID        | 47 of 50 | 1.36 m/s   | 0.60 m/s       | 1.3 deg | 18.6 m            | 0.34 deg    |
 
 Equal in calm air; two landings better in wind, with less sideways speed and half the gimbal
-movement. Three lessons from getting there:
+movement.
+
+Notes from training:
 
 - A policy trained without wind (the first attempt, before the curriculum named the training
   wind) landed 3 of 50 windy flights: it had never seen a gust.
@@ -447,7 +459,7 @@ movement. Three lessons from getting there:
   50 windy, 6 m closer to the pad in wind, but it drives the gimbal in a square wave during the
   boost and lets the rocket tumble in the coast, so it is not a design to fly.
 
-### Evaluating against the PID and flying the trained policy
+## Evaluating against the PID and flying the trained policy
 
 ```
 python scripts/evaluate.py runs/<run> --episodes 50

@@ -1,17 +1,16 @@
 """Electric hopper vehicle file: airframe, motor, gimbal, roll control, legs, sensors and controller gains.
 
-The physical part is a RocketConfig with one motor, so the six degree of freedom physics,
-sensors, servos and touchdown grading are shared with the solid rocket.
+The physical part is a RocketConfig with one motor, so physics, sensors, servos and touchdown grading are shared.
 """
 
 from dataclasses import dataclass
 from pathlib import Path
 
 from rocketsim.config import RocketConfig, _airframe, _gimbal, _legs, _motor
-from rocketsim.config import AeroConfig, ControlConfig
+from rocketsim.config import AeroConfig, ControlConfig, MotorConfig
 from rocketsim.guidance_config import POLICY, PID, EstimatorConfig, PidConfig, _estimator, _pid
 from rocketsim.sensors import SensorsConfig, load_sensors_config
-from rocketsim.units import MM_PER_M
+from rocketsim.units import MM_PER_M, STANDARD_GRAVITY
 from rocketsim.yaml_section import ConfigError, Section, read_yaml_mapping
 
 MAIN = "main"
@@ -72,7 +71,7 @@ class HopVehicleConfig:
         return self.body.name
 
     @property
-    def motor(self):
+    def motor(self) -> MotorConfig:
         return self.body.motor(MAIN)
 
     @property
@@ -144,7 +143,7 @@ def load_vehicle_config(path: str | Path) -> HopVehicleConfig:
         safety=_safety(root.sub("safety")),
         source=source,
     )
-    weight = vehicle.mass * 9.80665
+    weight = vehicle.mass * STANDARD_GRAVITY
     if vehicle.max_thrust <= weight:
         raise ConfigError(
             f"{source}: the motor's {vehicle.max_thrust:.1f} N cannot lift the {vehicle.mass:.2f} kg vehicle "

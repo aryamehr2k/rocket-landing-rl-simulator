@@ -30,16 +30,27 @@ The network only sees what the real board will see: the estimator's output, not 
 
 ## Where the network and PPO are
 
-- **Network**: two separate fully connected networks, built by Stable-Baselines3's `ActorCriticPolicy`.
+- **Network**: two separate fully connected networks, `ActorCritic` in `rocketsim/ppo.py`.
   The actor decides the commands and is the only part that is exported; the critic estimates the
   expected return and exists only during training. Sizes are set in the training file
   (`ppo.hidden_layers`: 64 x 64 tanh for the electric vehicle, 32 x 32 for the rocket).
-- **PPO**: Stable-Baselines3 `PPO`, created in `scripts/train.py`. It is not reimplemented here.
+- **PPO**: the project's own implementation in PyTorch, `rocketsim/ppo.py`, run by
+  `scripts/train.py`: rollouts from all flights, advantages by GAE, then several epochs of the
+  clipped objective over shuffled minibatches. Observations are normalised with a running mean
+  and standard deviation; rewards are divided by the running spread of the discounted return.
 - **Environment**: `rocketsim/hop/env.py` (electric vehicle) and `rocketsim/env.py` (rocket) turn one
   simulated flight into an episode; `rocketsim/vecenv.py` runs many flights at once in worker processes.
-- **After training**: the actor's weights and the input normalisation are written to
-  `runs/<run>/policy.npz` and published as a model folder in `models/<run>/` (see
-  [hardware_integration.md](hardware_integration.md)).
+- **Run folder**: each run writes `runs/<date>_<time>_<name>/` with
+  - `model.pt`: actor, critic, optimizer state and normalisation statistics;
+  - `policy.npz`: the actor's weights and the input normalisation as numpy arrays, rewritten every
+    `ppo.checkpoint_every` samples so a model can be flown before training ends;
+  - `progress.csv`: one row per PPO update (flights, success and landing rates, losses);
+  - `checkpoint.json`: samples done and the recent success rate at the last checkpoint;
+  - `summary.json`: samples, flights, run time and landing rate, written at the end;
+  - `configs/`: exact copies of every YAML file the run used.
+- **After training**: the run is published as a model folder in `models/<run>/` (see
+  [hardware_integration.md](hardware_integration.md)); an electric vehicle model is also flown
+  against the PID and the comparison is stored with it.
 
 ## One network, two planes
 
@@ -93,8 +104,8 @@ an invalid number.
   hover 3 to 12 s), so the network follows whatever the mission file says.
 - **Curriculum** (`curriculum`): calm air and low noise first, then wind up to 3 m/s, then up to 6 m/s.
 - **Scale** (`ppo`): `n_sims` flights simulated at once, spread over `workers` processes. Each
-  update uses `n_sims x 2 x n_steps` samples. About 450 to 750 samples per second on one shared
-  workstation.
+  update uses `n_sims x 2 x n_steps` samples. With 32 flights on 16 cores training runs at about
+  1,200 samples per second, so the 4 million sample residual run takes about an hour.
 - **Baseline**: every model is flown against the PID on the same seeds after training
   (`evaluation` in the training file); the comparison is stored with the model.
 

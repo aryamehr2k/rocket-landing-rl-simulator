@@ -1,7 +1,4 @@
-"""Fly a trained policy and the PID on the same seeds and report how often each lands.
-
-Randomisation, sensor noise and wind are on, as in the training YAML (or another one given
-with --sim). Every flight of the policy can also be written as a flight log for the viewer.
+"""Fly a trained policy and the PID on the same seeds, with the training YAML's errors and wind, and compare.
 
 Usage: python scripts/evaluate.py runs/20260926_120000_ppo --episodes 50 --sim configs/training/windy.yaml
 """

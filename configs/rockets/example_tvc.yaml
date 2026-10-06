@@ -16,7 +16,7 @@ airframe:
 aero:
   drag_coefficient: 0.60
   normal_force_slope_per_rad: 2.0   # mostly nose cone lift, only vestigial fins
-  cp_from_nose_mm: 494.0            # at the CG after the ascent burn on purpose, see README
+  cp_from_nose_mm: 494.0            # at the CG after the ascent burn on purpose, see docs/solid_rocket.md
 
 motors:
   ascent:
@@ -54,7 +54,7 @@ gimbal:
       min_us: 1000
       max_us: 2000
 
-drag_device:                      # four flat petals at the nose that open during the descent, see README
+drag_device:                      # four flat petals at the nose that open during the descent, see docs/solid_rocket.md
   drag_area_cm2: 566.0            # Cd times area of the open petals (about 470 cm2 of plate at Cd 1.2)
   station_from_nose_mm: 150.0     # ahead of the descent centre of gravity (494 mm), so it steadies the fall
   deploy_time_s: 0.5              # shut to fully open

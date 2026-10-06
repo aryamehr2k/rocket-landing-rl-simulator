@@ -1,13 +1,11 @@
 """A trained policy as plain numpy: the network weights, the observation normalisation and a runner.
 
-The runner turns the flight computer's state into a PlaneAction the way the firmware will:
-the same network once per plane, ignition from the average of the two ignite outputs. Weights
-are saved as a .npz next to the training run so flights and the C export need no PyTorch.
+Saved as a .npz, so flying a model and the C export need no PyTorch.
 """
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
@@ -15,6 +13,9 @@ from rocketsim.commands import PlaneAction
 from rocketsim.env import ACTION_HIGH, ACTION_LOW, GIMBAL, IGNITE
 from rocketsim.flightcomputer import FlightComputer
 from rocketsim.observation import PLANES, ObservationBuilder
+
+if TYPE_CHECKING:  # torch is only needed when training
+    from rocketsim.ppo import ActorCritic, ObservationNormalizer
 
 POLICY_FILE = "policy.npz"
 
@@ -65,22 +66,19 @@ def load_policy(path: str | Path) -> MlpPolicy:
     )
 
 
-def policy_from_sb3(model: Any, normalizer: Any, field_names: tuple[str, ...], activation: str) -> MlpPolicy:
-    """Pull the actor's weights out of a Stable-Baselines3 PPO model and its VecNormalize wrapper."""
-    linear = [m for m in model.policy.mlp_extractor.policy_net if hasattr(m, "weight")] + [model.policy.action_net]
-    weights = tuple(m.weight.detach().cpu().numpy().astype(np.float32) for m in linear)
-    biases = tuple(m.bias.detach().cpu().numpy().astype(np.float32) for m in linear)
-    size = weights[0].shape[1]
-    mean, std, clip = np.zeros(size, dtype=np.float32), np.ones(size, dtype=np.float32), float("inf")
-    if normalizer is not None and getattr(normalizer, "norm_obs", False):
-        mean = normalizer.obs_rms.mean.astype(np.float32)
-        std = np.sqrt(normalizer.obs_rms.var + normalizer.epsilon).astype(np.float32)
-        clip = float(normalizer.clip_obs)
-    return MlpPolicy(weights, biases, activation, mean, std, clip, field_names)
+def policy_from_training(model: "ActorCritic", normalizer: "ObservationNormalizer", field_names: tuple[str, ...]) -> MlpPolicy:
+    """The actor's weights and the observation normalisation of a PPO run, as numpy."""
+    linear = [layer for layer in model.actor if hasattr(layer, "weight")]
+    weights = tuple(layer.weight.detach().cpu().numpy().astype(np.float32) for layer in linear)
+    biases = tuple(layer.bias.detach().cpu().numpy().astype(np.float32) for layer in linear)
+    return MlpPolicy(
+        weights, biases, model.activation, normalizer.stats.mean.astype(np.float32), normalizer.std.astype(np.float32),
+        float(normalizer.clip), field_names,
+    )
 
 
 class PolicyController:
-    """Runs a policy for both planes and returns the PlaneAction for the flight computer."""
+    """Runs the network once per plane, as the firmware does; ignition comes from the mean of the two ignite outputs."""
 
     def __init__(self, policy: MlpPolicy, observer: ObservationBuilder, max_angle: float, ignite_threshold: float) -> None:
         if observer.names != policy.field_names:

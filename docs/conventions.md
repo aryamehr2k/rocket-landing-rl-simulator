@@ -1,7 +1,6 @@
 # Conventions
 
-Every module in `rocketsim/`, every script, every test and the firmware follow this file.
-If code and this file disagree, the code is wrong.
+Units, frames and sign rules used by the Python code and the firmware.
 
 ## Units
 
@@ -129,7 +128,7 @@ Rules:
   `linkage_ratio` is gimbal angle per servo angle and `sign` is `+1` or `-1` for the way the
   servo is mounted. `center_us`, `min_us` and `max_us` must be multiples of the resolution.
   Python and C round the same way so both emit the same pulse for the same command.
-- The servo model (stage 2) works in gimbal angle terms and applies, in this order: clip to
+- The servo model works in gimbal angle terms and applies, in this order: clip to
   `max_angle`, deadband on the change of command, pulse quantisation, pure delay
   `servo_delay`, rate limit `servo_rate_limit`. Its output is the actual gimbal angle.
 - Motors marked `gimbaled: false` thrust along the body axis through the pivot and produce no
@@ -164,7 +163,7 @@ Rules:
 
 An optional `drag_device` section describes a deployable brake (petals or flaps) as an ideal
 drag area at one station. It is opened by a fraction `f` in `[0, 1]`; `0` is shut and adds
-nothing, so a rocket without the section behaves exactly as before.
+nothing, so a rocket without the section has no brake.
 
 - `drag_area_cm2` is `Cd * A` of the fully open device on top of the body's drag; a flat plate
   has `Cd` about 1.2. `station_from_nose_mm` is where its force acts. `deploy_time_s` and
@@ -376,8 +375,8 @@ For a solid landing motor the only decision is when to send the igniter command.
   the fit lands within about 2 % of the true drag area in calm air and reads about 4 % high in
   a 4 m/s wind, because the airspeed is more than the descent speed. It corrects where the
   trigger fires, not the motor's impulse: with the brake area 15 % below or above the file the
-  example landed 19 and 14 of 20 with the fit against 17 and 9 without, and a hard part that
-  cannot stop the arrival speed is still not rescued. The example leaves it off.
+  example landed 19 and 14 of 20 with the fit against 17 and 9 without. The fit cannot help a
+  hard part that is too weak for the arrival speed. The example leaves it off.
 - A solid cannot be throttled, so this only works when the hard part of the burn can take
   the descent speed at the crossing down to the target speed with a small margin. Too little
   impulse leaves speed the tail cannot remove; too much stops the rocket in the air and it

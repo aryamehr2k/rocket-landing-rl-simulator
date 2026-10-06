@@ -1,8 +1,4 @@
-"""What the forms can offer: vehicle, mission, world and training files, and the trained models.
-
-A model is a folder with policy.npz and a copy of its hop training file: either an exported
-model in models/<name>/ (with model.json) or a finished hop run in runs/<run>/.
-"""
+"""What the forms can offer: vehicle, mission, world and training files, and the trained models."""
 
 from pathlib import Path
 from typing import Any
@@ -83,7 +79,7 @@ def trainings(paths: ProjectPaths) -> list[dict[str, Any]]:
 
 
 def models(paths: ProjectPaths) -> list[dict[str, Any]]:
-    """Exported models and finished hop runs that have a policy.npz, newest first."""
+    """Exported models (models/<name>/) and hop runs (runs/<run>/) that have a policy.npz, newest first."""
     found = []
     candidates = [(folder, "model") for folder in _folders(paths.models)]
     candidates += [(folder, "run") for folder in _folders(paths.runs)]

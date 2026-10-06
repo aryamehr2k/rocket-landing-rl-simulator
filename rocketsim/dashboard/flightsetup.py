@@ -1,9 +1,6 @@
 """One flight's settings from the dashboard form, and the simulation built from them.
 
-The live flight and the batch of many flights read the same form: vehicle, mission and world
-files, the controller (the PID or a trained model folder), seed, wind, hidden vehicle errors,
-sensor noise and mission overrides. `prepare` loads the files once; `new_simulation` then
-builds as many flights from them as needed, the same way rocketsim.hop.evaluate.fly does.
+`prepare` loads the files once; `new_simulation` then builds as many flights from them as needed.
 """
 
 import math

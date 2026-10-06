@@ -1,6 +1,7 @@
 import math
 from dataclasses import replace
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pytest
@@ -21,6 +22,8 @@ from rocketsim.training_config import TrainingConfig, load_training_config
 from rocketsim.vecenv import PlanePairVecEnv
 from rocketsim.yaml_section import ConfigError
 from tests.conftest import EXAMPLE_ROCKET, EXAMPLE_SIM
+
+SHORT_FLIGHT_STEPS = 40  # control steps; enough to check the worker plumbing without a whole flight
 
 
 @pytest.fixture(scope="module")
@@ -126,13 +129,54 @@ def test_vecenv_steps_both_planes_and_resets(setup: tuple[RocketConfig, SimConfi
         for done, info in zip(dones, infos):
             if done:
                 finished += 1
-                assert "terminal_observation" in info and info["terminal_observation"].shape == obs[0].shape
+                assert "landed" in info
         if finished >= 4:
             break
     assert finished >= 4
     venv.set_level(CurriculumLevel(0.0, 0.0, 0.0, 0.0))
     assert venv.reset().shape == (4, len(training.observation))
     venv.close()
+
+
+class ShortFlight(PlaneEpisode):
+    """A flight cut off after SHORT_FLIGHT_STEPS that reports its curriculum level in every info."""
+
+    def reset(self, seed: int | None = None) -> np.ndarray:
+        self.steps = 0
+        return super().reset(seed)
+
+    def step(self, actions: list[np.ndarray | None]) -> tuple[np.ndarray, np.ndarray, bool, dict[str, Any]]:
+        observations, rewards, done, info = super().step(actions)
+        self.steps += 1
+        return observations, rewards, done or self.steps >= SHORT_FLIGHT_STEPS, {**info, "level": self.level}
+
+
+def test_vecenv_workers_match_a_single_process(setup: tuple[RocketConfig, SimConfig, TrainingConfig]) -> None:
+    rocket, sim, training = setup
+    calm = CurriculumLevel(0.0, 0.0, 0.0, 0.0)
+    single, pooled = (
+        PlanePairVecEnv(lambda i: ShortFlight(rocket, sim, training, seed=30 + i), n_sims=2, workers=workers)
+        for workers in (1, 2)
+    )
+    actions = np.zeros((single.num_envs, single.action_size), dtype=np.float32)
+    try:
+        assert np.array_equal(single.reset(), pooled.reset())
+        single.set_level(calm)
+        pooled.set_level(calm)
+        restarted = np.zeros(pooled.num_envs, dtype=bool)
+        for _ in range(2 * SHORT_FLIGHT_STEPS):
+            expected, result = single.step(actions), pooled.step(actions)
+            for a, b in zip(expected[:3], result[:3]):
+                assert np.array_equal(a, b)
+            # The level set mid-flight applies from the next flight on.
+            assert all(info["level"] == calm for info, again in zip(result[3], restarted) if again)
+            if restarted.all():
+                break
+            restarted |= result[2]
+        assert restarted.all()
+    finally:
+        single.close()
+        pooled.close()
 
 
 def random_policy(size: int, names: tuple[str, ...]) -> MlpPolicy:

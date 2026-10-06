@@ -7,7 +7,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from rocketsim.config import load_rocket_config
+from rocketsim.config import RocketConfig, load_rocket_config
 from rocketsim.flightcomputer import HALF_STEP
 from rocketsim.landing_design import (
     ascent_apogee, descent_profile, design_from_motor, size_burn, size_descent, speed_at_heights,
@@ -15,7 +15,7 @@ from rocketsim.landing_design import (
 from rocketsim.landing_montecarlo import ErrorBudget, draw_errors, nominal_draws, simulate_landings
 from rocketsim.landing_sensitivity import ROW_NAMES, StopModel, single_error_draws, stop_sensitivities
 from rocketsim.landing_trigger import LandingTrigger
-from rocketsim.simconfig import load_sim_config
+from rocketsim.simconfig import EnvironmentConfig, load_sim_config
 from tests.conftest import EXAMPLE_ROCKET, EXAMPLE_SIM, REPO_ROOT
 
 CONTROL_DT, DT = 0.02, 0.005
@@ -23,9 +23,11 @@ FREEFALL_ROCKET = REPO_ROOT / "configs" / "rockets" / "example_tvc_freefall.yaml
 FREEFALL_MOTOR = REPO_ROOT / "configs" / "motors" / "example_g120_landing.yaml"
 TOOL = REPO_ROOT / "scripts" / "design_landing_burn.py"
 
+World = tuple[RocketConfig, EnvironmentConfig, LandingTrigger]
+
 
 @pytest.fixture(scope="module")
-def world() -> tuple:
+def world() -> World:
     rocket = load_rocket_config(EXAMPLE_ROCKET)
     env = load_sim_config(EXAMPLE_SIM).environment
     latency = (1 + HALF_STEP) * CONTROL_DT
@@ -33,7 +35,7 @@ def world() -> tuple:
     return rocket, env, trigger
 
 
-def test_brake_sizing_and_terminal_speed(world) -> None:
+def test_brake_sizing_and_terminal_speed(world: World) -> None:
     rocket, env, _ = world
     sizing = size_descent(rocket, env, 20.0, None, 0.05)
     assert sizing.device_drag_area == pytest.approx(0.0566, abs=0.001)
@@ -48,7 +50,7 @@ def test_brake_sizing_and_terminal_speed(world) -> None:
     assert at_marks == pytest.approx([17.0, 19.6, 19.9], abs=0.4)
 
 
-def test_hard_part_and_tail_sizing_reproduce_the_example_motor(world) -> None:
+def test_hard_part_and_tail_sizing_reproduce_the_example_motor(world: World) -> None:
     rocket, env, _ = world
     sizing = size_descent(rocket, env, None, rocket.drag_device.drag_area, 0.05)
     design = size_burn(rocket, sizing, env.gravity, 31.0, 0.92, 6.5, sizing.terminal_speed + 0.3, 0.5, 1.0)
@@ -58,7 +60,7 @@ def test_hard_part_and_tail_sizing_reproduce_the_example_motor(world) -> None:
     assert design.motor.total_mass == pytest.approx(0.170, abs=0.003)
 
 
-def test_motor_strength_window_and_landing_rates(world) -> None:
+def test_motor_strength_window_and_landing_rates(world: World) -> None:
     rocket, env, trigger = world
     apogee = 105.5
     scales = 1.0 + np.arange(-8, 9) / 100.0
@@ -78,7 +80,7 @@ def test_motor_strength_window_and_landing_rates(world) -> None:
     assert 0.6 < loose_outcome.landed.mean() < tight.landed.mean()
 
 
-def test_closed_form_sensitivities_match_the_1d_model_one_error_at_a_time(world) -> None:
+def test_closed_form_sensitivities_match_the_1d_model_one_error_at_a_time(world: World) -> None:
     rocket, env, trigger = world
     apogee = 105.5
     sizing = size_descent(rocket, env, None, rocket.drag_device.drag_area, 0.05)

@@ -1,9 +1,6 @@
 """How far the landing burn's stop point moves per error, and what that costs at touchdown.
 
-Closed forms around the nominal one dimensional flight of rocketsim.landing_montecarlo, for the
-design tool's sensitivity table, plus the single error draws that check them against that
-model. The stop point is where the hard part of the burn has brought the descent down to the
-target speed; the rest of the hard ramp lifts the rocket a little, then the tail sinks it.
+Closed forms around the nominal flight of rocketsim.landing_montecarlo, plus single error draws that check them.
 """
 
 import math

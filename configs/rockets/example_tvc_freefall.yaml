@@ -1,6 +1,6 @@
 # The example rocket as it was before the drag brake: a free fall from apogee to about 36 m/s
-# and a 46 N hard burn lit 38 m up. Kept for comparison with example_tvc.yaml; the README
-# section "The landing burn" explains why this design lands only about 6 flights in 10.
+# and a 46 N hard burn lit 38 m up. Kept for comparison with example_tvc.yaml; the section
+# "The landing burn" in docs/solid_rocket.md explains why this design lands only about 6 flights in 10.
 # Every number here is a stand-in. Positions are stations from the nose tip toward the tail.
 
 name: example_tvc_freefall
@@ -16,7 +16,7 @@ airframe:
 aero:
   drag_coefficient: 0.60
   normal_force_slope_per_rad: 2.0   # mostly nose cone lift, only vestigial fins
-  cp_from_nose_mm: 494.0            # at the CG after the ascent burn on purpose, see README
+  cp_from_nose_mm: 494.0            # at the CG after the ascent burn on purpose, see docs/solid_rocket.md
 
 motors:
   ascent:

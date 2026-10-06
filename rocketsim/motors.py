@@ -1,8 +1,4 @@
-"""Motor files, thrust curves and propellant flow.
-
-Two formats are read: RASP .eng files as published on ThrustCurve.org and simple YAML
-files with time and thrust pairs. See docs/conventions.md for the ignition semantics.
-"""
+"""Motor files, thrust curves and propellant flow: RASP .eng files (as on ThrustCurve.org) and YAML motors."""
 
 import math
 from dataclasses import dataclass, field

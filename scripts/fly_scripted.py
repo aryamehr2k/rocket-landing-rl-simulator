@@ -1,12 +1,4 @@
-"""Fly the rocket closed loop with the onboard PID and landing trigger, or open loop.
-
-Closed loop (default): the flight computer calibrates on the pad, launches, steers the boost,
-lights the landing motor from its stopping distance table and steers the landing. Open loop
-(--open-loop): fixed gimbal, no PID, landing motor at --landing-ignite-at if given. Either way
-the flight log CSV has the sensor readings, the estimate and the truth. With --episodes the
-same flight is repeated with different seeds and summarised. --landing-thrust-scale and
---dry-mass-offset-g and --brake-area-scale pin a hidden error the flight computer does not know,
-for sweeps.
+"""Fly the rocket closed loop with the onboard PID and landing trigger (or a trained policy), or open loop.
 
 Usage: python scripts/fly_scripted.py --sim configs/training/windy.yaml --out runs/windy.csv --plot
 """

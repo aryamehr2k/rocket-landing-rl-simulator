@@ -1,12 +1,4 @@
-"""The live flight: one simulation at a time in a background thread, paced to the wall clock.
-
-The thread runs control steps until the simulated time catches up with the wall clock times the
-playback speed, then records a frame for the browser, about FRAME_RATE_HZ times a second. The
-simulator is only a few times faster than real time, so at a speed it cannot keep up with it
-runs as fast as it can instead of falling further and further behind. Wind, pushes, speed and
-pause arrive from other threads and take the same lock as the stepping, so they land between
-two control steps.
-"""
+"""The live flight: one simulation at a time in a background thread, paced to the wall clock."""
 
 import math
 import threading
@@ -72,6 +64,11 @@ def parse_speed(raw: Any) -> float | None:
 
 
 class LiveFlight:
+    """Steps the flight until simulated time catches up with the clock times the speed, then records a frame.
+
+    Wind, pushes, speed and pause come from other threads and take the same lock, so they land between control steps.
+    """
+
     def __init__(self) -> None:
         self.changed = threading.Condition(threading.Lock())
         self.start_lock = threading.Lock()

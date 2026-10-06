@@ -33,7 +33,6 @@ def tilt_degrees(log: dict[str, np.ndarray], prefix: str) -> np.ndarray:
 
 
 def plot_flight_log(log: dict[str, np.ndarray], title: str) -> plt.Figure:
-    """Build the figure for one flight log and return it."""
     t = log["time_s"]
     distance = np.hypot(log["true_x_m"], log["true_y_m"])
     fig, axes = plt.subplots(3, 2, figsize=FIGURE_SIZE, sharex=True)

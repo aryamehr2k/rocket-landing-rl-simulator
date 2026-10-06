@@ -12,7 +12,7 @@ from rocketsim.yaml_section import ConfigError, Section, read_yaml_mapping
 
 ACTIVATIONS = ("tanh", "relu")
 DEFAULT_CHECKPOINT_EVERY = 500_000  # samples between saved copies of the network during training
-DEFAULT_LOG_STD_INIT = 0.0  # Stable-Baselines3's own default: exploration noise of one action unit
+DEFAULT_LOG_STD_INIT = 0.0  # exploration noise of one action unit
 DEFAULT_SCALE = 1.0
 NEUTRAL_THRESHOLD = 0.0
 

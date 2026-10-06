@@ -8,13 +8,15 @@ import yaml
 
 from rocketsim.actuators import RollActuator, Throttle
 from rocketsim.hop.env import HopEpisode
-from rocketsim.hop.mission import Guidance, HopPhase, MissionScore, load_mission_config, with_targets
+from rocketsim.hop.evaluate import draw_errors
+from rocketsim.hop.mission import Guidance, HopPhase, MissionResult, MissionScore, load_mission_config, with_targets
 from rocketsim.hop.policy import plane_action
+from rocketsim.hop.rewards import HopRewardCalculator
 from rocketsim.hop.simulation import HopSimulation
 from rocketsim.hop.training import load_hop_training_config
-from rocketsim.hop.vehicle import is_vehicle_file, load_vehicle_config
+from rocketsim.hop.vehicle import HopVehicleConfig, is_vehicle_file, load_vehicle_config
 from rocketsim.motors import load_motor
-from rocketsim.physics import IBURNED, IW, RocketDynamics
+from rocketsim.physics import IBURNED, IVEL, IW, PAD_CLEARANCE, Flight, RocketDynamics
 from rocketsim.simconfig import load_sim_config
 from rocketsim.vecenv import PlanePairVecEnv
 from rocketsim.yaml_section import ConfigError
@@ -27,7 +29,7 @@ CALM = REPO_ROOT / "configs" / "training" / "calm_exact.yaml"
 DT = 0.02
 
 
-def pid_vehicle():
+def pid_vehicle() -> HopVehicleConfig:
     vehicle = load_vehicle_config(VEHICLE)
     return replace(vehicle, controllers=replace(vehicle.controllers, steering="pid", throttle="pid"))
 
@@ -130,6 +132,44 @@ def test_mission_score_criteria() -> None:
     assert result.reached_altitude and result.hover_ok and result.success
     assert not score.result(landed=True, miss_distance=12.0, touchdown_speed=0.8, aborted=False).success
     assert not score.result(landed=False, miss_distance=1.0, touchdown_speed=3.0, aborted=False).success
+
+
+def test_dropping_back_onto_the_pad_is_not_a_landing() -> None:
+    vehicle = load_vehicle_config(VEHICLE)
+    dynamics = RocketDynamics(vehicle.body, load_sim_config(CALM).environment)
+    flight = Flight(dynamics, 0.005)
+    flight.inputs.ignite(0, 0.0)
+    for throttle, steps in ((1.0, 20), (0.0, 100)):  # a few centimetres up, then the fan stops
+        flight.inputs.motors[0].throttle = throttle
+        for _ in range(steps):
+            flight.step()
+    assert not flight.done and not flight.lifted_off
+    assert dynamics.lowest_point(flight.y) == pytest.approx(0.0, abs=1e-12)
+    assert np.all(flight.y[IVEL] == 0.0)
+    flight.inputs.motors[0].throttle = 1.0
+    while dynamics.lowest_point(flight.y) <= PAD_CLEARANCE:
+        flight.step()
+    flight.inputs.motors[0].throttle = 0.0
+    while not flight.done:
+        flight.step()
+    assert flight.touchdown is not None
+
+
+def test_only_a_touchdown_after_the_descent_pays_the_landing() -> None:
+    rewards = HopRewardCalculator(load_hop_training_config(TRAINING).rewards)
+    gentle = MissionResult(False, 0.1, 0.0, False, True, 0.0, True, 0.2, False)
+    on_plan = rewards.terminal(gentle, False, 0.0, HopPhase.LANDING)
+    early = rewards.terminal(gentle, False, 0.0, HopPhase.ASCENT)
+    assert on_plan - early == pytest.approx(rewards.config.landed - rewards.config.crash)
+
+
+def test_hidden_mass_error_is_drawn_over_the_whole_range() -> None:
+    ranges = load_hop_training_config(TRAINING).hidden_errors
+    offsets = [draw_errors(ranges, seed).dry_mass_offset for seed in range(50)]
+    low, high = ranges.dry_mass_offset
+    assert low == pytest.approx(-0.08) and high == pytest.approx(0.08)  # kg, from [-80, 80] g in the file
+    assert all(low <= offset <= high for offset in offsets)
+    assert max(offsets) - min(offsets) > high - low - 0.02
 
 
 def test_pid_flies_the_mission_in_calm_air() -> None:

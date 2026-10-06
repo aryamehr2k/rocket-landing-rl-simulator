@@ -1,7 +1,6 @@
 """Sizing a drag brake and a solid landing burn for a descent at terminal speed.
 
-Everything here is one dimensional and reuses the flight computer's own burn integration
-(rocketsim.landing_trigger.integrate_burn), so the design and the trigger table agree.
+One dimensional, with the trigger's own burn integration (landing_trigger.integrate_burn), so design and table agree.
 """
 
 from dataclasses import dataclass, replace

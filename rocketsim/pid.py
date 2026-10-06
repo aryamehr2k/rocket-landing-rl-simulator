@@ -1,8 +1,6 @@
 """The PID baseline controller: lateral position and velocity to a tilt command, tilt to a gimbal command.
 
-The same controller runs once per plane (pitch plane: x, yaw plane: y) with the same gains,
-as the policy will later. Signs follow docs/conventions.md: a positive world-plane command
-leans the nose toward the positive lateral axis of that plane.
+A positive world-plane command leans the nose toward the positive lateral axis of that plane (docs/conventions.md).
 """
 
 import math

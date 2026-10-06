@@ -1,8 +1,6 @@
 """One mission flight of the electric vehicle as a training episode, seen as two control planes.
 
-Same interface as rocketsim.env.PlaneEpisode, so rocketsim.vecenv runs many of them at once and
-one network learns from both planes. Every reset draws the hidden vehicle errors, the mission
-variation and the wind of the flight.
+Same interface as rocketsim.env.PlaneEpisode. Each reset draws the hidden errors, a mission variation and the wind.
 """
 
 from dataclasses import replace
@@ -20,7 +18,6 @@ from rocketsim.hop.training import HopTrainingConfig
 from rocketsim.hop.vehicle import HopVehicleConfig
 from rocketsim.observation import PLANES, ObservationBuilder
 from rocketsim.simconfig import SimConfig
-from rocketsim.units import g_to_kg
 
 SEED_LIMIT = 2 ** 31 - 1
 
@@ -94,7 +91,7 @@ class HopEpisode:
         ranges, factor = self.training.hidden_errors, self.level.hidden_errors
         return HopErrors(
             thrust_scale=float(self.rng.uniform(*scale_range(ranges.thrust_scale, factor))),
-            dry_mass_offset=g_to_kg(float(self.rng.uniform(*scale_range(ranges.dry_mass_offset, factor)))),
+            dry_mass_offset=float(self.rng.uniform(*scale_range(ranges.dry_mass_offset, factor))),
         )
 
     def _draw_wind(self) -> None:
@@ -132,7 +129,8 @@ class HopEpisode:
         if done:
             result = self.sim.result
             timed_out = self.sim.flight.touchdown is None and not result.aborted
+            phase = self.sim.computer.guidance.phase
             for plane in PLANES:
-                rewards[plane] += self.rewards.terminal(result, timed_out, float(self.sim.flight.y[plane]))
+                rewards[plane] += self.rewards.terminal(result, timed_out, float(self.sim.flight.y[plane]), phase)
             info = flight_info(self.sim)
         return self.observe(), rewards, done, info

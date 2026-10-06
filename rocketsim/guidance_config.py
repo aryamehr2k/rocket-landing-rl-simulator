@@ -1,8 +1,4 @@
-"""Flight computer settings from the rocket YAML: sensors, estimator, phases, trigger, PID, safety.
-
-These sections describe what runs on the board, so one rocket file holds everything the
-firmware needs. rocketsim.config calls load_flight_computer_config while loading a rocket.
-"""
+"""Flight computer settings from the rocket YAML: sensors, estimator, phases, trigger, PID, safety, brake."""
 
 from dataclasses import dataclass
 from pathlib import Path

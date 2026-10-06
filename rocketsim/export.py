@@ -1,8 +1,4 @@
-"""Writing a trained network for other runtimes: float32 C arrays for the flight computer, and ONNX.
-
-Both are checked against the Python forward pass (rocketsim.policy.MlpPolicy) on random inputs:
-the C code is compiled with the exported header and run, the ONNX file is run with onnxruntime.
-"""
+"""Writing a trained network for other runtimes (float32 C arrays for the flight computer, ONNX) and checking both."""
 
 import shutil
 import subprocess

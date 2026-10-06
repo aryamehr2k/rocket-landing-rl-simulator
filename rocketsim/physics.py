@@ -1,6 +1,5 @@
 """Six degree of freedom rigid body dynamics of the rocket, integrated with RK4.
 
-This module has no RL or Gymnasium imports so it can be tested on its own.
 Frames, signs and the state layout are defined in docs/conventions.md.
 """
 
@@ -27,6 +26,7 @@ DOWN = np.array([0.0, 0.0, -1.0])
 RK4_WEIGHTS = (1.0, 2.0, 2.0, 1.0)
 ROLL_AXIS = 2
 HALF = 0.5
+PAD_CLEARANCE = 0.1  # m; a gentle drop back from lower than this is settling on the pad, not a landing
 
 
 def state_size(num_motors: int) -> int:
@@ -253,8 +253,20 @@ class Flight:
         self.t += self.dt
         self.apogee = max(self.apogee, self.y[IZ])
         lowest = self.dynamics.lowest_point(self.y)
-        # Touchdown only counts once the feet have actually been off the ground.
-        if lowest > 0.0:
+        # Feet below the pad while still rising are the liftoff transient of a moving CG, not a touchdown.
+        if lowest > PAD_CLEARANCE:
             self.feet_clear = True
-        elif self.feet_clear:
-            self.touchdown = self.dynamics.grade_touchdown(self.t, self.y)
+        elif lowest <= 0.0 and (self.feet_clear or self.y[IVZ] < 0.0):
+            touchdown = self.dynamics.grade_touchdown(self.t, self.y)
+            if self.feet_clear or not touchdown.success:
+                self.touchdown = touchdown
+            else:
+                self._settle_on_pad()
+
+    def _settle_on_pad(self) -> None:
+        """A vehicle that drops gently back before clearing the pad stands on it again, upright and at rest."""
+        self.lifted_off = False
+        self.y[IVEL] = 0.0
+        self.y[IW] = 0.0
+        self.y[IQ] = quaternion.IDENTITY
+        self.y[IZ] = self.dynamics.rocket.feet_station - self.dynamics.mass_properties(self.y).cg

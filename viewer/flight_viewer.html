@@ -75,7 +75,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
-// ---- pure helpers (no DOM, no three.js) ----
+// Pure helpers: no DOM, no three.js.
 
 const STATE_KEYS = ['x_m', 'y_m', 'z_m', 'vx_mps', 'vy_mps', 'vz_mps', 'qw', 'qx', 'qy', 'qz'];
 const DEFAULTS = { length: 0.9, diameter: 0.075, cg: 0.5, pivot: 0.84, span: 0.3, legHeight: 0.12, legs: 4 };
@@ -171,7 +171,7 @@ function indexAtTime(times, t) {
 const fmt = (v, digits = 2) => (Number.isFinite(v) ? v.toFixed(digits) : '--');
 const deg = (rad) => rad * 180 / Math.PI;
 
-// ---- simulator objects (three.js, no DOM) ----
+// Simulator objects: three.js, no DOM.
 
 // Simulator frame: x downrange, y crossrange, z up. three.js is y-up. Rotating this group by
 // -90 degrees about x maps simulator (x, y, z) to three.js (x, z, -y), so simulator positions
@@ -268,7 +268,7 @@ function buildTrail(rows, preferEstimate) {
   return new THREE.Line(geometry, new THREE.LineBasicMaterial({ color: 0x4fc3f7 }));
 }
 
-// ---- page ----
+// The page: controls, playback and loading a flight.
 
 const ids = ['csvFile', 'yamlFile', 'status', 'readout', 'playBtn', 'slider', 'speed', 'useEst', 'follow'];
 const ui = Object.fromEntries(ids.map((id) => [id, document.getElementById(id)]));

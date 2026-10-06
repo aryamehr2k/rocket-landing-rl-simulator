@@ -1,8 +1,6 @@
 """The flight plan: climb to a target height, hover, descend and land inside a radius.
 
-`Guidance` turns the mission file into a reference height and vertical speed every control
-step, which the controller (PID or policy) follows. `MissionScore` grades a flight on the true
-state against the mission's pass criteria. The firmware runs the same guidance in C.
+`Guidance` gives the reference height and vertical speed, as the C firmware does; `MissionScore` grades a flight.
 """
 
 import math

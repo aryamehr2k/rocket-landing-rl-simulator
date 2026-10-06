@@ -1,8 +1,6 @@
-"""C headers that carry one trained model and its vehicle and mission to firmware/hop/hop_control.c,
-and a replay check that flies a mission in Python and runs the same estimates through the C code.
+"""C headers that carry a trained model, its vehicle and mission to firmware/hop/hop_control.c, and a replay check.
 
-    policy_config.h  which inputs the network expects, in order, with their scales; output scaling
-    hop_params.h     the mission plan, PID gains, safety limits and launch time as C initialisers
+policy_config.h lists the network's inputs, scales and output scaling; hop_params.h the mission, gains and limits.
 """
 
 import shutil

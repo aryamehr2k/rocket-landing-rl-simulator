@@ -1,11 +1,4 @@
-"""Train a control policy with PPO on many simulated flights at once.
-
-The training YAML's `task` picks the problem: `hop` flies the electric test vehicle through its
-whole mission (vehicle and mission named in the YAML); without a task it is the solid rocket's
-landing burn (rocket from --rocket). Every run gets a timestamped folder under runs/ with the
-model, the policy as plain numpy weights, the observation normalisation, the training log and
-exact copies of the YAML files. At the end the trained network is written to models/<run>/
-(see scripts/export_policy.py) and, for the electric vehicle, flown against the PID.
+"""Train a control policy with PPO on many simulated flights at once; the run goes to runs/<date>_<time>_<name>/.
 
 Usage: python scripts/train.py --training configs/training/hop.yaml
        python scripts/train.py --rocket configs/rockets/example_tvc.yaml --training configs/training/default.yaml
@@ -15,36 +8,37 @@ import argparse
 import json
 import shutil
 import time
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 import numpy as np
+import torch
 
 from rocketsim.config import load_rocket_config
-from rocketsim.curriculum import level_for
+from rocketsim.curriculum import CurriculumLevel, level_for
 from rocketsim.env import PlaneEpisode
 from rocketsim.hop.env import HopEpisode
 from rocketsim.hop.mission import load_mission_config
 from rocketsim.hop.training import HOP_TASK, HopTrainingConfig, load_hop_training_config, training_task
 from rocketsim.hop.vehicle import load_vehicle_config
-from rocketsim.policy import POLICY_FILE, policy_from_sb3
+from rocketsim.modelpack import MODELS_DIR
+from rocketsim.policy import POLICY_FILE, policy_from_training
+from rocketsim.ppo import Ppo
 from rocketsim.simconfig import load_sim_config
-from rocketsim.training_config import PpoConfig, TrainingConfig, load_training_config
+from rocketsim.training_config import TrainingConfig, load_training_config
+from rocketsim.training_log import FLIGHT_WINDOW, NO_WIND_LIMIT, PROGRESS_FILE, FlightStats, ProgressLog, console_line
 from rocketsim.vecenv import PLANES_PER_FLIGHT, PlanePairVecEnv
 from rocketsim.yaml_section import ConfigError
-from export_policy import publish  # noqa: E402
-from rocketsim.modelpack import MODELS_DIR
 
-MODEL_FILE = "model.zip"
-NORMALIZER_FILE = "vecnormalize.pkl"
+from export_policy import publish  # a sibling script; scripts/ is on sys.path when this runs
+
+MODEL_FILE = "model.pt"
 SUMMARY_FILE = "summary.json"
 CHECKPOINT_FILE = "checkpoint.json"
 CONFIG_DIR = "configs"
 TRAINING_DIR = "training"
-OBS_CLIP = 10.0
-EPISODE_WINDOW = 100  # recent flights the logged landing rate is averaged over
-LOG_INTERVAL = 1  # PPO updates between log lines
 SEED_STRIDE = 1000  # flights of one run get seeds seed * SEED_STRIDE + index
 TORCH_THREADS = 1  # the networks are tiny; more threads only fight the simulation workers for the CPU
 
@@ -56,11 +50,12 @@ def run_folder(root: Path, name: str) -> Path:
     return folder
 
 
-def copy_configs(folder: Path, rocket_path: Path, training_path: Path) -> None:
-    """Exact copies of every YAML the run used. The rocket, motor and sensor files keep their folder
-    names so the relative paths inside the rocket file still resolve; the training file goes to training/."""
-    rocket = load_rocket_config(rocket_path)
-    sources = [rocket_path, Path(rocket.computer.sensors.source)] + [Path(m.spec.source) for m in rocket.motors]
+def copy_run_configs(folder: Path, sources: list[Path], training_path: Path) -> None:
+    """Exact copies of the YAML files a run used, under configs/.
+
+    Each source keeps its folder name, so relative paths between them still resolve; the training
+    file always goes to configs/training/, where the model packaging looks for it.
+    """
     targets = [folder / CONFIG_DIR / source.parent.name / source.name for source in sources]
     targets.append(folder / CONFIG_DIR / TRAINING_DIR / training_path.name)
     for source, target in zip(sources + [training_path], targets):
@@ -68,98 +63,77 @@ def copy_configs(folder: Path, rocket_path: Path, training_path: Path) -> None:
         shutil.copy(source, target)
 
 
+def copy_configs(folder: Path, rocket_path: Path, training_path: Path) -> None:
+    """The rocket, sensor, motor and training files of a solid rocket run."""
+    rocket = load_rocket_config(rocket_path)
+    sources = [rocket_path, Path(rocket.computer.sensors.source)] + [Path(m.spec.source) for m in rocket.motors]
+    copy_run_configs(folder, sources, training_path)
+
+
 def copy_hop_configs(folder: Path, training_path: Path, training: HopTrainingConfig) -> None:
-    """Copies of the training, vehicle, mission, motor and sensor files, keeping their folder names."""
+    """The vehicle, mission, sensor, motor and training files of an electric vehicle run."""
     vehicle = load_vehicle_config(training.vehicle_path)
-    sources = [training_path, training.vehicle_path, training.mission_path, Path(vehicle.sensors.source),
-               Path(vehicle.motor.spec.source)]
-    for source in sources:
-        target = folder / CONFIG_DIR / source.parent.name / source.name
-        target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy(source, target)
+    sources = [training.vehicle_path, training.mission_path, Path(vehicle.sensors.source), Path(vehicle.motor.spec.source)]
+    copy_run_configs(folder, sources, training_path)
 
 
-def make_callback(training: TrainingConfig | HopTrainingConfig, total: int, folder: Path) -> Any:
-    """Curriculum by progress, plus a landing rate over the last flights in the PPO log."""
-    from stable_baselines3.common.callbacks import BaseCallback
-
-    class TrainingCallback(BaseCallback):
-        def __init__(self) -> None:
-            super().__init__()
-            self.recent: list[dict[str, Any]] = []
-            self.flights = 0
-            self.level = None
-            self.next_checkpoint = training.ppo.checkpoint_every
-
-        def _on_step(self) -> bool:
-            progress = self.num_timesteps / total
-            level = level_for(training.curriculum, progress)
-            if level != self.level:
-                self.level = level
-                flights = getattr(self.training_env, "venv", self.training_env)  # VecNormalize wraps the flights
-                flights.set_level(level)
-                self.logger.record("curriculum/wind_max", level.wind_max if level.wind_max is not None else -1.0)
-                self.logger.record("curriculum/hidden_errors", level.hidden_errors)
-            # Both planes of a flight carry the same summary; count the flight once.
-            for info in self.locals.get("infos", ())[::PLANES_PER_FLIGHT]:
-                if "landed" in info and "terminal_observation" in info:
-                    self.recent.append(info)
-                    self.flights += 1
-            self.recent = self.recent[-EPISODE_WINDOW:]
-            return True
-
-        def _on_rollout_end(self) -> None:
-            if self.num_timesteps >= self.next_checkpoint:
-                self.next_checkpoint += training.ppo.checkpoint_every
-                save_checkpoint(self.model, self.training_env, folder, self.num_timesteps, self.recent)
-            if self.recent:
-                landed = [r for r in self.recent if r["landed"]]
-                self.logger.record("flights/landed_rate", len(landed) / len(self.recent))
-                if "success" in self.recent[0]:
-                    self.logger.record("flights/mission_success_rate", float(np.mean([r["success"] for r in self.recent])))
-                self.logger.record("flights/count", self.flights)
-                speeds = [r["vertical_speed"] for r in self.recent if "vertical_speed" in r]
-                misses = [r["miss"] for r in self.recent if "miss" in r]
-                if speeds:
-                    self.logger.record("flights/mean_touchdown_speed", float(np.mean(speeds)))
-                if misses:
-                    self.logger.record("flights/mean_miss", float(np.mean(misses)))
-
-    return TrainingCallback()
-
-
-def save_checkpoint(model: Any, normalized: Any, folder: Path, timesteps: int, recent: list[dict[str, Any]]) -> None:
+def save_checkpoint(agent: Ppo, observation_names: tuple[str, ...], folder: Path, flights: FlightStats) -> None:
     """The network so far as policy.npz, so a model can be exported or flown while training continues."""
-    flights = getattr(normalized, "venv", normalized)
-    policy_from_sb3(model, normalized, flights.observation_names, model.policy.activation_fn.__name__.lower()).save(
-        folder / POLICY_FILE
-    )
-    state = {"timesteps": timesteps, "recent_flights": len(recent)}
-    if recent and "success" in recent[0]:
-        state["recent_mission_success_rate"] = float(np.mean([r["success"] for r in recent]))
+    policy_from_training(agent.model, agent.normalizer, observation_names).save(folder / POLICY_FILE)
+    state: dict[str, Any] = {"timesteps": agent.timesteps, "recent_flights": len(flights.recent)}
+    success = flights.rate("success")
+    if success is not None:
+        state["recent_mission_success_rate"] = success
     (folder / CHECKPOINT_FILE).write_text(json.dumps(state, indent=2))
 
 
-def build_model(venv: Any, ppo: PpoConfig, folder: Path) -> Any:
-    import torch
-    from stable_baselines3 import PPO
-    from stable_baselines3.common.logger import configure
-    from torch import nn
+def run_ppo(flights_env: PlanePairVecEnv, training: TrainingConfig | HopTrainingConfig, total: int,
+            folder: Path) -> tuple[Ppo, FlightStats]:
+    """PPO updates until total samples, with the curriculum by progress, checkpoints and one log row per update."""
+    flights = FlightStats()
+    curriculum: dict[str, float] = {}
 
-    torch.set_num_threads(TORCH_THREADS)
+    def apply_level(level: CurriculumLevel) -> None:
+        flights_env.set_level(level)
+        curriculum["curriculum/wind_max"] = level.wind_max if level.wind_max is not None else NO_WIND_LIMIT
+        curriculum["curriculum/hidden_errors"] = level.hidden_errors
 
-    activation = nn.Tanh if ppo.activation == "tanh" else nn.ReLU
-    model = PPO(
-        "MlpPolicy", venv, n_steps=ppo.n_steps, batch_size=ppo.batch_size, n_epochs=ppo.n_epochs,
-        learning_rate=ppo.learning_rate, gamma=ppo.gamma, gae_lambda=ppo.gae_lambda, clip_range=ppo.clip_range,
-        ent_coef=ppo.ent_coef, seed=ppo.seed, verbose=1,
-        policy_kwargs={
-            "net_arch": {"pi": list(ppo.hidden_layers), "vf": list(ppo.hidden_layers)}, "activation_fn": activation,
-            "log_std_init": ppo.log_std_init,
-        },
-    )
-    model.set_logger(configure(str(folder), ["stdout", "csv"]))
-    return model
+    level = level_for(training.curriculum, 0.0)
+    apply_level(level)  # before the agent resets the flights, so the first ones already fly the first stage
+
+    def on_step(timesteps: int, infos: list[dict[str, Any]]) -> None:
+        nonlocal level
+        new_level = level_for(training.curriculum, min(timesteps / total, 1.0))  # the last rollout may overshoot
+        if new_level != level:
+            level = new_level
+            apply_level(level)
+        flights.add(infos)
+
+    ppo = replace(training.ppo, total_timesteps=total)  # model.pt then records what this run was asked for
+    agent = Ppo(flights_env, ppo, episode_window=FLIGHT_WINDOW * PLANES_PER_FLIGHT)
+    log = ProgressLog(folder / PROGRESS_FILE)
+    started = time.time()
+    next_checkpoint = training.ppo.checkpoint_every
+    iteration = 0
+    while agent.timesteps < total:
+        rollout = agent.collect(on_step)
+        losses = agent.update(rollout)
+        iteration += 1
+        if agent.timesteps >= next_checkpoint:
+            next_checkpoint += training.ppo.checkpoint_every
+            save_checkpoint(agent, flights_env.observation_names, folder, flights)
+        elapsed = time.time() - started
+        row: dict[str, Any] = {
+            "time/iterations": iteration, "time/total_timesteps": agent.timesteps,
+            "time/fps": int(agent.timesteps / elapsed), "time/time_elapsed": int(elapsed),
+            "rollout/ep_rew_mean": float(np.mean(agent.finished_returns)) if agent.finished_returns else None,
+            "rollout/ep_len_mean": float(np.mean(agent.finished_lengths)) if agent.finished_lengths else None,
+            **flights.summary(), **curriculum, **{f"train/{key}": value for key, value in losses.items()},
+        }
+        log.write(row)
+        print(console_line(row), flush=True)
+    log.close()
+    return agent, flights
 
 
 def train(
@@ -187,25 +161,22 @@ def train(
     ppo = training.ppo
     total = timesteps if timesteps is not None else ppo.total_timesteps
 
-    venv = PlanePairVecEnv(make_episode, ppo.n_sims, ppo.workers)
-    from stable_baselines3.common.vec_env import VecNormalize
-
-    normalized = VecNormalize(venv, norm_obs=True, norm_reward=True, clip_obs=OBS_CLIP, gamma=ppo.gamma)
-    model = build_model(normalized, ppo, folder)
-    callback = make_callback(training, total, folder)
+    torch.set_num_threads(TORCH_THREADS)
+    torch.backends.mkldnn.enabled = False  # oneDNN takes milliseconds on layers this small, plain BLAS microseconds
+    flights_env = PlanePairVecEnv(make_episode, ppo.n_sims, ppo.workers)
     started = time.time()
-    model.learn(total_timesteps=total, callback=callback, log_interval=LOG_INTERVAL)
+    try:
+        agent, flights = run_ppo(flights_env, training, total, folder)
+    finally:
+        flights_env.close()
     elapsed = time.time() - started
-    model.save(folder / MODEL_FILE)
-    normalized.save(str(folder / NORMALIZER_FILE))
-    policy_from_sb3(model, normalized, venv.observation_names, ppo.activation).save(folder / POLICY_FILE)
+    agent.save(folder / MODEL_FILE)
+    policy_from_training(agent.model, agent.normalizer, flights_env.observation_names).save(folder / POLICY_FILE)
     summary = {
-        "timesteps": total, "flights": callback.flights, "seconds": round(elapsed, 1),
-        "recent_landed_rate": float(np.mean([r["landed"] for r in callback.recent])) if callback.recent else None,
-        "training": training_path.name,
+        "timesteps": agent.timesteps, "requested_timesteps": total, "flights": flights.count,
+        "seconds": round(elapsed, 1), "recent_landed_rate": flights.rate("landed"), "training": training_path.name,
     }
     (folder / SUMMARY_FILE).write_text(json.dumps(summary, indent=2))
-    normalized.close()
     model_folder = publish(folder, folder.name, evaluate=True, install=False, models=models)
     print(f"model written to {model_folder}")
     return folder

@@ -1,0 +1,191 @@
+# Data sheet of the electric test vehicle. Copy this file to configs/datasheets/<your_name>.yaml,
+# fill in every entry marked required and replace the optional values you have measured, then run
+#   python scripts/build_vehicle.py configs/datasheets/<your_name>.yaml
+# Positions are measured from the top (nose) of the vehicle downward. An empty optional entry uses
+# the default written next to it, or a value worked out from the rest of the sheet where it says so.
+
+vehicle:
+  # Short name for the config files: letters, digits, _.
+  name:                             # optional, the sheet's file name when empty
+  # Mass ready to fly, battery and fan unit in. Scale.
+  total_mass_g:                     # required
+  # Balance point (centre of gravity) from the top, ready to fly. Balance it across a ruler edge.
+  balance_point_mm:                 # required
+  # Body length from the top to the bottom end, legs not counted. Tape measure.
+  length_mm:                        # required
+  # Body outside diameter. Calliper.
+  diameter_mm:                      # required
+  # Pitch inertia of the whole vehicle about its balance point. CAD (g mm2 / 1e9) or a swing test.
+  pitch_inertia_kgm2:               # optional, solid cylinder when empty
+  # Roll inertia of the whole vehicle about its long axis. CAD.
+  roll_inertia_kgm2:                # optional, solid cylinder when empty
+  # Drag coefficient on the body diameter. OpenRocket.
+  drag_coefficient: 0.8             # optional
+  # Centre of pressure from the top, wind from the side. OpenRocket.
+  centre_of_pressure_mm:            # optional, middle of the body when empty
+  # Side force slope for wind across the body. Keep unless you have wind tunnel data.
+  side_force_slope_per_rad: 8.0     # optional
+
+fan:
+  # Fan, motor and ESC model.
+  model:                            # optional
+  # Fan, motor and ESC as mounted, battery not included. Scale before mounting.
+  unit_mass_g:                      # required
+  # Centre of the fan unit from the top. Tape measure.
+  position_mm:                      # required
+  # Fan (duct) diameter. Calliper.
+  diameter_mm:                      # required
+  # Fan unit length. Calliper.
+  length_mm:                        # optional, same as the diameter when empty
+  # Static thrust at full throttle, freshly charged battery. Thrust stand.
+  max_thrust_n:                     # required
+  # Static thrust at 50 % throttle. Same test; shows whether thrust follows the throttle in a straight line.
+  half_throttle_thrust_n:           # optional, not checked when empty
+  # Time for the thrust to reach 63 % of a throttle step. Thrust stand log at 100 Hz or faster.
+  spin_up_ms:                       # required
+  # Hover time on one charge down to the low voltage cut. Thrust stand at hover throttle.
+  battery_time_s:                   # required
+  # Roll torque of the spinning fan per newton of thrust. Torque arm on the thrust stand.
+  reaction_torque_nm_per_n: 0.003   # optional
+
+thrust_vectoring:
+  # Gimbal pivot or vane hinge line from the top. Tape measure.
+  pivot_mm:                         # required
+  # Largest thrust deflection each way, each axis. Phone level at full servo travel.
+  max_angle_deg:                    # required
+  # Thrust angle per degree of servo horn travel. Move the horn 20 deg, divide the thrust angle by 20.
+  linkage_ratio:                    # required
+  # Servo model.
+  servo_model:                      # optional
+  # Servo speed: time for 60 deg of horn travel at your voltage. Servo datasheet.
+  servo_time_per_60deg_s:           # required
+  # Time from a command to the horn starting to move. Slow motion video.
+  servo_delay_ms: 20.0              # optional
+  # Smallest thrust angle change the servo follows. Step the command on the bench.
+  servo_deadband_deg: 0.1           # optional
+  # Pulse that holds the thrust straight. Find it on the bench.
+  servo_center_us: 1500             # optional
+  # Pulse change per degree of horn travel. Servo datasheet.
+  servo_us_per_deg: 10.0            # optional
+  # Shortest pulse the flight code may send. Servo datasheet.
+  servo_min_us: 1000                # optional
+  # Longest pulse the flight code may send. Servo datasheet.
+  servo_max_us: 2000                # optional
+  # Smallest pulse step the board puts out. Board datasheet.
+  pulse_resolution_us: 1            # optional
+  # +1 if a longer pitch servo pulse swings the air jet toward +x, else -1. Mark one side of the body the
+  # pitch servo swings the jet toward as +x, send servo_center_us + 100 and watch the air leaving the duct.
+  # The simulator cannot catch a wrong sign, only this test can.
+  pitch_servo_sign: 1               # optional
+  # +1 if a longer yaw servo pulse swings the air jet toward +y, else -1. +y is 90 deg anticlockwise from
+  # +x, seen from above. Same test with the yaw servo.
+  yaw_servo_sign: 1                 # optional
+
+roll_control:
+  # Roll fans, reaction wheel or vanes.
+  kind:                             # optional
+  # Largest roll torque. Roll fan thrust x its distance from the centre line x fans pushing the same way.
+  max_torque_nm:                    # required
+  # Time to reach 63 % of a torque step. Thrust stand log.
+  response_ms: 50.0                 # optional
+
+legs:
+  # Number of legs.
+  count:                            # required
+  # Diameter of the circle through the feet. Tape measure.
+  foot_circle_mm:                   # required
+  # How far the feet reach below the bottom end of the body. Tape measure.
+  below_body_mm:                    # required
+  # Highest drop onto the legs they survive, at flight mass. Drop test; 115 mm lands at 1.5 m/s.
+  max_drop_height_mm:               # required
+  # Sideways speed at touchdown the legs survive. Drop test with a push.
+  max_sideways_speed_mps: 1.0       # optional
+  # Tilt at touchdown the legs survive. Drop test on a slope.
+  max_tilt_deg: 10.0                # optional
+
+sensors:
+  # Flight computer board.
+  flight_computer:                  # optional
+  # How often the flight code runs the control loop. Flight code; must divide the simulator's 200 Hz step:
+  # 200, 100, 50, 40 or 25.
+  control_rate_hz:                  # required
+  # Control steps from reading the sensors to the servo command. Flight code.
+  command_delay_steps: 1            # optional
+  # IMU model.
+  imu_model:                        # optional
+  # IMU sample rate the flight code reads. Flight code; at most 200, the simulator's step rate, so enter 200
+  # for a faster IMU.
+  imu_rate_hz:                      # required
+  # IMU filter delay. Datasheet, from the filter setting.
+  imu_lag_ms: 2.0                   # optional
+  # Accelerometer noise. 30 s log with the board still: standard deviation.
+  accel_noise_mps2: 0.05            # optional
+  # Accelerometer bias change between power-ups. Mean of several still logs.
+  accel_bias_mps2: 0.02             # optional
+  # Accelerometer full scale (16 g is 157). Datasheet.
+  accel_range_mps2: 156.0           # optional
+  # Gyroscope noise. Same still log.
+  gyro_noise_deg_per_s: 0.1         # optional
+  # Gyroscope bias change between power-ups. Several still logs.
+  gyro_bias_deg_per_s: 0.5          # optional
+  # Gyroscope full scale. Datasheet.
+  gyro_range_deg_per_s: 2000.0      # optional
+  # Barometer model.
+  barometer_model:                  # optional
+  # Barometer sample rate the flight code reads. Flight code; at most 200.
+  barometer_rate_hz:                # required
+  # Barometer filter delay. Datasheet, from the oversampling setting.
+  barometer_lag_ms: 20.0            # optional
+  # Barometer height noise. Same still log.
+  barometer_noise_m: 0.3            # optional
+  # Barometer height drift over a flight. 10 min still log.
+  barometer_bias_m: 1.0             # optional
+  # GPS model.
+  gps_model:                        # optional
+  # GPS update rate, 0 if there is no GPS. Flight code; at most 200.
+  gps_rate_hz:                      # required
+  # GPS delay. Datasheet.
+  gps_lag_ms: 100.0                 # optional
+  # GPS position scatter from sample to sample. 2 min log standing still at the field.
+  gps_noise_m: 0.8                  # optional
+  # Slow GPS position wander over a minute. Same log.
+  gps_drift_m: 1.0                  # optional
+  # GPS speed noise. Same log.
+  gps_speed_noise_mps: 0.1          # optional
+
+launch_site:
+  # Field height above sea level. Map.
+  elevation_m: 300.0                # optional
+  # Steady wind expected on test day. Weather forecast.
+  wind_mps: 4.0                     # optional
+  # Gust strength (standard deviation). Weather forecast.
+  gust_mps: 1.5                     # optional
+
+mission:
+  # Hover height of the feet above the pad. Competition rules.
+  target_height_m:                  # required
+  # Hover time at the target height. Competition rules.
+  hover_time_s:                     # required
+  # Touchdown must be within this distance of the pad. Competition rules.
+  landing_radius_m:                 # required
+  # Counts as at the target height within this band. Competition rules.
+  height_tolerance_m: 2.0           # optional
+  # Planned climb speed.
+  climb_speed_mps: 4.0              # optional
+  # How quickly the plan speeds up and slows down.
+  climb_acceleration_mps2: 1.5      # optional
+  # Planned descent speed.
+  descent_speed_mps: 3.0            # optional
+  # Height where the plan slows to the touchdown speed. At least (descent_speed^2 - final_speed^2) / (2 x
+  # climb_acceleration) + 1 m.
+  final_height_m: 4.0               # optional
+  # Touchdown speed the plan aims for. At least 0.5 m/s below what the legs survive.
+  final_speed_mps: 0.7              # optional
+  # Extra hover time planned so the required time is met with margin.
+  extra_hover_s: 2.0                # optional
+  # Flight time limit. Competition rules; longer than the plan.
+  max_flight_time_s:                # optional, plan + 40 s when empty
+  # Tilt at which the flight computer cuts the fan.
+  abort_tilt_deg: 40.0              # optional
+  # Distance from the pad at which the flight computer cuts the fan.
+  geofence_radius_m: 40.0           # optional

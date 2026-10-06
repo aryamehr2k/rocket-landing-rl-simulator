@@ -1,12 +1,4 @@
-"""Gymnasium environment around the closed loop simulation.
-
-One flight is one episode. The policy sees the flight computer's estimate through the fields
-named in the training YAML and commands the gimbal of one plane plus the landing igniter. The
-same policy runs once for the pitch plane (x) and once for the yaw plane (y), as it will on the
-flight computer, so `PlaneEpisode` exposes one flight as two plane views and the training
-vectorised environment (rocketsim.vecenv) stacks them. `RocketLandingEnv` is the plain
-Gymnasium view of one plane with the PID flying the other, for tests and experiments.
-"""
+"""Training episodes and a Gymnasium environment around the closed loop simulation; one flight is one episode."""
 
 from dataclasses import replace
 from typing import Any
@@ -40,7 +32,11 @@ def rocket_for_training(rocket: RocketConfig, training: TrainingConfig) -> Rocke
 
 
 class PlaneEpisode:
-    """One simulated flight seen as two plane views, with rewards and the curriculum applied."""
+    """One simulated flight seen as two plane views, with rewards and the curriculum applied.
+
+    The same policy flies the pitch plane (x) and the yaw plane (y), as on the flight computer;
+    rocketsim.vecenv stacks the two views for training.
+    """
 
     def __init__(self, rocket: RocketConfig, sim: SimConfig, training: TrainingConfig, seed: int) -> None:
         rocket = rocket_for_training(rocket, training)
@@ -160,7 +156,7 @@ def episode_info(sim: Simulation) -> dict[str, Any]:
 
 
 class RocketLandingEnv(gym.Env):
-    """One plane of the flight as a Gymnasium environment; the PID flies the other plane."""
+    """One plane of the flight as a Gymnasium environment, the PID flying the other; for tests and experiments."""
 
     metadata = {"render_modes": []}
 

@@ -1,9 +1,6 @@
 """Training runs: the run folders under runs/, their progress logs, and trainings started from the page.
 
-A run folder is `<date>_<time>_<name>` with the Stable-Baselines3 progress.csv, and summary.json
-once training has finished. Its console output is in runs/train_logs/<name>.log when it was
-started the usual way. A training started here runs scripts/train.py in its own process group,
-so the Stop button can end it together with its simulation workers, and only those.
+A run folder `<date>_<time>_<name>` holds progress.csv (rocketsim/training_log.py), and summary.json once finished.
 """
 
 import csv
@@ -48,7 +45,7 @@ SERIES = {
     "wind": "curriculum/wind_max",
     "fps": "time/fps",
 }
-FILLED = ("wind",)  # logged only when it changes, so each row carries the last value forward
+FILLED = ("wind",)  # older runs logged the wind only on the rows where it changed; carry it forward
 
 
 class TrainingError(ValueError):
@@ -168,7 +165,10 @@ class TrainingManager:
         }
 
     def start(self, training: Path, name: str, timesteps: int | None) -> dict[str, Any]:
-        """Run scripts/train.py in the background, its console output into runs/train_logs/<name>.log."""
+        """Run scripts/train.py in the background, its console output into runs/train_logs/<name>.log.
+
+        It gets its own process group, so the Stop button ends it with its simulation workers, and only those.
+        """
         if not NAME.match(name):
             raise TrainingError("the run name may use letters, digits, - and _ (at most 40)")
         if timesteps is not None and not 1 <= timesteps <= MAX_TIMESTEPS:

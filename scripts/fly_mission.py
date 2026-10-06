@@ -1,19 +1,13 @@
-"""Fly the electric vehicle's mission (launch, climb, hover, descent, landing) in the simulator.
+"""Fly the electric vehicle's mission (launch, climb, hover, descent, landing) with the PID or a trained model.
 
-With no --model the PID flies; with --model models/<name> the trained AI flies. One flight writes
-a flight log, and with --plot a figure of the inputs, outputs and mission reference, with --animate
-a 3D GIF. With --flights N it flies N flights on seeds seed..seed+N-1 and prints how many met every
-mission criterion; --compare also flies the PID on the same seeds.
-
-Usage: python scripts/fly_mission.py --plot --animate
-       python scripts/fly_mission.py --model models/hop_latest --wind-mps 4 --gust-mps 1.5 --plot
-       python scripts/fly_mission.py --model models/hop_latest --flights 50 --compare --plot
+Usage: python scripts/fly_mission.py --model models/hop_latest --flights 50 --compare --wind-mps 4 --animate
 """
 
 import argparse
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 from rocketsim.flightlog import read_flight_log
 from rocketsim.hop.evaluate import (
@@ -101,7 +95,7 @@ def main() -> None:
     print(f"logs in {out}")
 
 
-def describe(info: dict) -> str:
+def describe(info: dict[str, Any]) -> str:
     verdict = "MISSION OK" if info["success"] else "mission failed"
     if info["aborted"]:
         verdict += " (aborted)"

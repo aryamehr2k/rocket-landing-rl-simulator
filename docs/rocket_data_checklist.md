@@ -5,8 +5,9 @@ needed and why. Copy `configs/rockets/example_tvc.yaml` to a new file, fill in e
 below, and the simulator, the design tool and later the training run on your rocket. Every
 number in the example file is a placeholder.
 
-Accuracy column: how much error the landing tolerates, from the sensitivity study in the
-README and `docs/physics.md`. Measure the first group before anything else.
+Accuracy column: how much error the landing tolerates, from the sensitivity study in
+[solid_rocket.md](solid_rocket.md) and [physics.md](physics.md). Measure the first group before
+anything else.
 
 ## Measure these first
 
@@ -35,7 +36,7 @@ README and `docs/physics.md`. Measure the first group before anything else.
 |-------------------------------|---------------------------------------|-------------------------------------------------------------|----------|
 | drag coefficient of the body  | `aero.drag_coefficient`               | OpenRocket at 20 to 40 m/s, legs and petals shut             | 20 %     |
 | normal force slope per radian | `aero.normal_force_slope_per_rad`     | OpenRocket (nose cone plus fins)                            | 20 %     |
-| centre of pressure from the nose | `aero.cp_from_nose_mm`             | OpenRocket; compare with the burnout CG, see docs/physics.md section 4 | 10 mm |
+| centre of pressure from the nose | `aero.cp_from_nose_mm`             | OpenRocket; compare with the burnout CG, see docs/physics.md section 6 | 10 mm |
 
 ## Motors and their positions
 
@@ -80,7 +81,7 @@ README and `docs/physics.md`. Measure the first group before anything else.
 | number of legs                | `legs.count`                                | count                                               |
 | allowed touchdown speed down  | `legs.max_touchdown_vertical_speed_mps`     | drop test of the legs with the rocket's mass; 2 m/s is a hobby leg |
 | allowed sideways speed        | `legs.max_touchdown_lateral_speed_mps`      | same drop test with a sideways push                 |
-| allowed tilt                  | `legs.max_touchdown_tilt_deg`               | must be below the tip-over angle in docs/physics.md |
+| allowed tilt                  | `legs.max_touchdown_tilt_deg`               | must be below the tip-over angle in docs/physics.md section 12 |
 
 ## Sensors (`configs/sensors/<name>.yaml`)
 

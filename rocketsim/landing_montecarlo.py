@@ -1,9 +1,6 @@
 """Many one dimensional landings at once: the descent, the brake rules, the trigger and the burn.
 
-Each draw has its own hidden errors (igniter delay, motor strength, mass, brake drag area) and
-estimator noise; the flight computer's trigger and brake rules run on the estimates with the
-nominal rocket, as they do on the board. The physics is vertical only, so wind, tilt and
-lateral speed are not here; the real simulator adds those.
+Vertical only, so no wind or tilt; the trigger and brake rules run on noisy estimates with the nominal rocket.
 """
 
 from dataclasses import dataclass

@@ -1,10 +1,6 @@
 """When to light a solid landing motor: a stopping distance table built from its thrust curve.
 
-For every downward speed the table holds how far the rocket falls from ignition until the burn
-has slowed it to the target speed (or the motor burns out). The trigger fires when the height
-above the ground, corrected for the igniter delay, has come down to that distance. With a drag
-device the table counts its drag at the opening planned for the burn, and the delay prediction
-counts the drag at the current opening. See docs/conventions.md.
+It fires when the height, corrected for the igniter delay, has come down to the distance the burn needs.
 """
 
 import math
