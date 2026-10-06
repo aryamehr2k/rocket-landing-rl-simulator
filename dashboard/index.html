@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rocket control pad</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M8 1 L11 6 V12 H5 V6 Z' fill='%232a78d6'/%3E%3Cpath d='M5 12 L3 15 M11 12 L13 15' stroke='%232a78d6' stroke-width='1.4'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="style.css">
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+  }
+}
+</script>
+<script type="module" src="main.js"></script>
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">Rocket control pad</div>
+  <nav class="tabs">
+    <a href="#fly" data-tab="fly">Fly</a>
+    <a href="#batch" data-tab="batch">Many flights</a>
+    <a href="#training" data-tab="training">Training</a>
+    <a href="#models" data-tab="models">Models</a>
+  </nav>
+  <div id="serverStatus" class="muted">connecting</div>
+</header>
+
+<main>
+  <section id="tab-fly" class="tab">
+    <aside class="panel left">
+      <form id="flyForm" autocomplete="off"></form>
+      <div class="actions">
+        <button id="flyLaunch" class="primary" type="button">Launch</button>
+        <button id="flyPause" type="button" disabled>Pause</button>
+        <button id="flyStop" class="danger" type="button" disabled>Stop</button>
+      </div>
+      <div id="flyError" class="error"></div>
+    </aside>
+
+    <div class="view">
+      <div id="flyScene" class="scene"></div>
+      <div class="overlay hud">
+        <span id="hudPhase" class="phase">READY</span>
+        <span id="hudTime">t 0.0 s</span>
+        <span id="hudController" class="muted"></span>
+        <span id="hudRate" class="muted"></span>
+      </div>
+      <div class="overlay view-options">
+        <label class="check"><input type="checkbox" id="followCamera" checked> Follow camera</label>
+        <label class="check"><input type="checkbox" id="showCharts" checked> Charts</label>
+      </div>
+      <div class="overlay push-pad" aria-label="Push the vehicle sideways by 1 m/s">
+        <span></span><button type="button" data-push="+y" disabled>+y</button><span></span>
+        <button type="button" data-push="-x" disabled>-x</button><span class="label">push<br>1 m/s</span><button type="button" data-push="+x" disabled>+x</button>
+        <span></span><button type="button" data-push="-y" disabled>-y</button><span></span>
+      </div>
+    </div>
+
+    <aside class="panel right">
+      <h2>Telemetry</h2>
+      <dl id="telemetry" class="telemetry"></dl>
+      <h2>Mission checklist</h2>
+      <ul id="checklist" class="checklist"></ul>
+      <div id="verdict" class="verdict hidden"></div>
+      <div id="flyChartsBlock">
+        <h2>Charts</h2>
+        <div id="flyCharts" class="charts"></div>
+      </div>
+    </aside>
+  </section>
+
+  <section id="tab-batch" class="tab">
+    <aside class="panel left">
+      <form id="batchForm" autocomplete="off"></form>
+      <div class="actions">
+        <button id="batchRun" class="primary" type="button">Fly all</button>
+      </div>
+      <div id="batchError" class="error"></div>
+    </aside>
+    <div class="content">
+      <h3 id="batchTitle">Many flights</h3>
+      <p id="batchStatus" class="muted">Pick the setup on the left and press Fly all. Every flight uses the next seed, so a model and the PID meet the same sensor noise, gusts and hidden errors.</p>
+      <div class="progress hidden" id="batchProgress"><div></div></div>
+      <div id="batchResults"></div>
+    </div>
+  </section>
+
+  <section id="tab-training" class="tab">
+    <aside class="panel left">
+      <h2>Runs</h2>
+      <table class="runs">
+        <thead><tr><th>Run</th><th>State</th><th>Steps</th><th>fps</th><th>Success</th></tr></thead>
+        <tbody id="runList"></tbody>
+      </table>
+      <p id="runListNote" class="note"></p>
+      <h2>Start training</h2>
+      <form id="trainForm" autocomplete="off">
+        <label class="field"><span>Training file</span><select id="trainFile"></select></label>
+        <div class="grid2 spaced">
+          <label class="field"><span>Run name</span><input type="text" id="trainName" placeholder="hop_try1" pattern="[A-Za-z0-9_\-]{1,40}"></label>
+          <label class="field"><span>Timesteps</span><input type="number" id="trainSteps" min="1" step="1" placeholder="from file"></label>
+        </div>
+        <p class="note">Runs scripts/train.py in the background; its output goes to runs/train_logs/&lt;name&gt;.log.</p>
+        <button id="trainStart" class="primary" type="button">Start training</button>
+        <div id="trainError" class="error"></div>
+      </form>
+    </aside>
+    <div class="content" id="runDetail">
+      <p class="muted">Select a run on the left to see its learning curves and console log.</p>
+    </div>
+  </section>
+
+  <section id="tab-models" class="tab">
+    <aside class="panel left">
+      <h2>Models</h2>
+      <div id="modelList" class="cards"></div>
+      <p class="note">Exported models from models/ and finished hop runs from runs/ that have a policy.npz.</p>
+    </aside>
+    <div class="content" id="modelDetail">
+      <p class="muted">Select a model on the left.</p>
+    </div>
+  </section>
+</main>
+</body>
+</html>
